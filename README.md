@@ -15,7 +15,7 @@ curl -fsSL https://raw.githubusercontent.com/mattmezza/undocked/main/install.sh 
 
 The installer verifies a checksum and installs a statically linked Linux binary
 for x86_64 or aarch64 in `~/.local/bin`. Run it again to upgrade, or pass a version
-with `sh -s -- v0.1.1`. Set `PREFIX` to choose another install prefix. You need
+with `sh -s -- v0.1.2`. Set `PREFIX` to choose another install prefix. You need
 an X11 session with RandR 1.3 or newer.
 
 Open the editor with `undocked`. For automatic switching, start the daemon from
@@ -160,7 +160,7 @@ make check
 sudo make clean install
 ```
 
-`make check` uses Xvfb and xdotool. `make release name=v0.1.1` pushes a version
+`make check` uses Xvfb and xdotool. `make release name=v0.1.2` pushes a version
 tag. GitHub Actions builds, tests, and publishes the static binaries for both
 architectures with their checksums.
 

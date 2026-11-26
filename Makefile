@@ -3,7 +3,7 @@ PKG_CONFIG ?= pkg-config
 PREFIX ?= /usr/local
 BINDIR ?= $(PREFIX)/bin
 DATADIR ?= $(PREFIX)/share/undocked
-VERSION ?= 0.1.1
+VERSION ?= 0.1.2
 BUILD ?= build
 PACKAGES = x11 xrandr freetype2 harfbuzz
 
