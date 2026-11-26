@@ -20,7 +20,7 @@ typedef struct {
     Config config;
     Reply live;
     Layout base, draft, extended;
-    bool editing, closing, mirrored, save_auto, have_extended;
+    bool editing, closing, mirrored, save_auto, have_extended, redraw;
     int selected, dragging, start_x, start_y, from_x, from_y, offset, menu_count;
     float scale, origin_x, origin_y;
     cui_rect tiles[OUTPUTS], canvas;
@@ -46,12 +46,12 @@ fill(Editor *e, cui_rect bounds, cui_color color, float radius)
 static void
 label(Editor *e, cui_rect bounds, const char *text, float size, cui_color color, bool mono, bool center)
 {
+    if (bounds.w <= 0 || bounds.h <= 0) return;
     cui_context *ui = e->paint.ui;
     cui_begin_absolute_box(ui, 0, (cui_box){
         .align_x = center ? CUI_ALIGN_CENTER : CUI_ALIGN_START, .align_y = CUI_ALIGN_CENTER}, bounds);
     cui_text_style style = {.monospace = mono};
     cui_str visible = cui_string(text);
-    if (bounds.w <= 0 || bounds.h <= 0) { cui_end_box(ui); return; }
     while (visible.length && cui_measure_text_ex(ui, visible, size, style).width > bounds.w) {
         visible.length--;
         while (visible.length && ((unsigned char)visible.data[visible.length] & 0xc0) == 0x80)
@@ -80,23 +80,53 @@ button(Editor *e, const char *key, cui_rect bounds, const char *name, bool accen
     cui_interaction state = cui_interact(ui, id, CUI_ROLE_BUTTON, cui_string(name), disabled, false, 0);
     cui_text_line(ui, cui_string(name), 13, fg, 17, (cui_text_style){0});
     cui_end_box(ui);
+    if (state.activated) e->redraw = true;
     return state.activated;
 }
 
-static bool
-is_mirror(const Layout *layout)
+static const Placement *
+main_display(const Layout *layout)
 {
     const Placement *first = NULL;
-    int count = 0;
     for (int i = 0; i < layout->count; i++) {
         const Placement *p = &layout->output[i];
         if (!p->enabled) continue;
-        count++;
+        if (p->primary) return p;
         if (!first) first = p;
-        else if (p->x != first->x || p->y != first->y || p->mode.width != first->mode.width ||
-                 p->mode.height != first->mode.height || p->rotation != first->rotation) return false;
     }
-    return count >= 2;
+    return first;
+}
+
+static void
+keep_visible(Editor *e)
+{
+    if (!e->window) return;
+    Display *d = e->x.display;
+    int x, y;
+    Window child;
+    if (!XTranslateCoordinates(d, e->window, e->x.root, 0, 0, &x, &y, &child)) return;
+    int width = e->paint.width, height = e->paint.height;
+    for (int i = 0; i < e->base.count; i++) {
+        Placement p = e->base.output[i];
+        if (!p.enabled) continue;
+        int w, h;
+        dimensions(p, &w, &h);
+        if (x >= p.x && y >= p.y && x + width <= p.x + w && y + height <= p.y + h)
+            return;
+    }
+    const Placement *primary = main_display(&e->base);
+    if (!primary) return;
+    int w, h;
+    dimensions(*primary, &w, &h);
+    if (width > w || height > h) {
+        if (width > w) width = w;
+        if (height > h) height = h;
+        XSizeHints hints = {.flags = PMinSize | PMaxSize, .min_width = width < 640 ? width : 640,
+            .min_height = height < 480 ? height : 480, .max_width = 1920, .max_height = 1440};
+        XSetWMNormalHints(d, e->window, &hints);
+    }
+    XMoveResizeWindow(d, e->window, primary->x + (w - width) / 2, primary->y + (h - height) / 2,
+                      (unsigned)width, (unsigned)height);
 }
 
 static void
@@ -105,14 +135,17 @@ receive(Editor *e, Reply reply, bool reset)
     uint64_t old = topology_key(&e->live.topology);
     uint64_t next = topology_key(&reply.topology);
     bool changed = e->live.version && old != next;
-    bool finished = e->live.remaining && !reply.remaining;
+    bool confirmation_changed = (e->live.remaining > 0) != (reply.remaining > 0);
+    Layout active = current_layout(&reply.topology);
+    bool moved = !layout_equal(&active, &e->base);
     e->live = reply;
-    e->base = current_layout(&e->live.topology);
-    if (reset || changed || !e->editing || finished) {
+    e->base = active;
+    if (moved) keep_visible(e);
+    if (reset || changed || confirmation_changed || (!e->editing && moved && e->dragging < 0)) {
         e->draft = e->base;
         e->editing = false;
         e->dragging = -1;
-        e->mirrored = is_mirror(&e->draft);
+        e->mirrored = layout_mirrored(&e->draft);
         if (changed) {
             e->have_extended = false;
             e->menu = NONE;
@@ -145,7 +178,7 @@ static void
 edit(Editor *e)
 {
     e->editing = !layout_equal(&e->base, &e->draft);
-    e->mirrored = is_mirror(&e->draft);
+    e->mirrored = layout_mirrored(&e->draft);
     *e->notice = 0;
 }
 
@@ -169,7 +202,7 @@ set_mirror(Editor *e, bool mirror)
     } else if (e->have_extended) {
         e->draft = e->extended;
         edit(e);
-    } else use_suggestion(e, "row");
+    } else if (extend_layout(&e->live, &e->draft, e->notice)) edit(e);
 }
 
 static bool
@@ -403,10 +436,12 @@ draw_menu(Editor *e)
 
     if (e->menu == SAVE_MENU) {
         fill(e, (cui_rect){18, 62, width - 36, 43}, t.background, t.radius);
-        char value[NAME + 8];
-        snprintf(value, sizeof value, "%s▏", e->name);
-        label(e, (cui_rect){28, 64, width - 56, 40}, *e->name ? value : "Type a preset name",
+        label(e, (cui_rect){28, 64, width - 56, 40}, *e->name ? e->name : "Type a preset name",
               16, *e->name ? t.foreground : t.muted, false, false);
+        if (*e->name) {
+            float end = cui_measure_text_ex(ui, cui_string(e->name), 16, (cui_text_style){0}).width;
+            fill(e, (cui_rect){30 + fminf(end, width - 60), 74, 1, 18}, t.accent, 0);
+        }
         if (button(e, "auto", (cui_rect){18, 119, 154, 32},
                    e->save_auto ? "Autoapply on" : "Autoapply off", e->save_auto, false)) e->save_auto = !e->save_auto;
         if (button(e, "save-submit", (cui_rect){width - 116, 119, 98, 32}, "Save", true, !*e->name)) save(e);
@@ -538,11 +573,9 @@ draw(Editor *e)
     if (e->menu != NONE) draw_menu(e);
     cui_end_box(ui);
     painter_present(&e->paint, &e->x, e->window, e->gc, cui_end_frame(ui));
-    if (e->menu == NONE) {
-        cui_color fg = t.accent;
-        unsigned long pixel = x11_color(DefaultVisual(e->x.display, e->x.screen), fg.r, fg.g, fg.b);
-        display_icon(&e->x, e->window, e->gc, 22, 28, 26, pixel);
-    }
+    cui_color fg = e->menu == NONE ? t.accent : mix(t.accent, t.background, .57f);
+    unsigned long pixel = x11_color(DefaultVisual(e->x.display, e->x.screen), fg.r, fg.g, fg.b);
+    display_icon(&e->x, e->window, e->gc, 22, 28, 26, pixel);
     XFlush(e->x.display);
 }
 
@@ -698,14 +731,21 @@ editor_main(void)
         return 1;
     }
     int width = e.config.width, height = e.config.height;
-    if (width > e.live.topology.width - 36 && e.live.topology.width >= 676) width = e.live.topology.width - 36;
-    if (height > e.live.topology.height - 60 && e.live.topology.height >= 540) height = e.live.topology.height - 60;
+    int area_x = 0, area_y = 0, area_width = e.live.topology.width, area_height = e.live.topology.height;
+    const Placement *anchor = main_display(&e.base);
+    if (anchor) {
+        area_x = anchor->x;
+        area_y = anchor->y;
+        dimensions(*anchor, &area_width, &area_height);
+    }
+    if (width > area_width && area_width > 0) width = area_width;
+    if (height > area_height && area_height > 0) height = area_height;
     if (!painter_open(&e.paint, &e.x, &e.config, width, height)) {
         fprintf(stderr, "undocked: Could not initialize the CUI renderer.\n");
         XCloseDisplay(d);
         return 1;
     }
-    int left = (e.live.topology.width - width) / 2, top = (e.live.topology.height - height) / 2;
+    int left = area_x + (area_width - width) / 2, top = area_y + (area_height - height) / 2;
     e.window = XCreateSimpleWindow(d, e.x.root, left > 0 ? left : 0, top > 0 ? top : 0,
         (unsigned)width, (unsigned)height, 0, 0, 0);
     e.gc = XCreateGC(d, e.window, 0, NULL);
@@ -714,13 +754,14 @@ editor_main(void)
     Atom dialog = XInternAtom(d, "_NET_WM_WINDOW_TYPE_DIALOG", False);
     XChangeProperty(d, e.window, XInternAtom(d, "_NET_WM_WINDOW_TYPE", False),
                     XA_ATOM, 32, PropModeReplace, (unsigned char *)&dialog, 1);
-    XSizeHints hints = {.flags = PMinSize | PMaxSize, .min_width = 640, .min_height = 480,
+    XSizeHints hints = {.flags = PMinSize | PMaxSize, .min_width = width < 640 ? width : 640, .min_height = height < 480 ? height : 480,
                         .max_width = 1920, .max_height = 1440};
     XSetWMNormalHints(d, e.window, &hints);
     e.close = XInternAtom(d, "WM_DELETE_WINDOW", False);
     XSetWMProtocols(d, e.window, &e.close, 1);
     XSelectInput(d, e.window, ExposureMask | StructureNotifyMask | ButtonPressMask | ButtonReleaseMask |
         PointerMotionMask | KeyPressMask | KeyReleaseMask | EnterWindowMask | LeaveWindowMask | FocusChangeMask);
+    XSelectInput(d, e.x.root, PropertyChangeMask);
     XSetSelectionOwner(d, selection, e.window, CurrentTime);
     XMapRaised(d, e.window);
     bool dirty = true;
@@ -750,6 +791,10 @@ editor_main(void)
             case KeyPress: case KeyRelease:
                 keyboard(&e, event.xkey);
                 break;
+            case PropertyNotify:
+                if (event.xproperty.window == e.x.root && event.xproperty.atom == XA_RESOURCE_MANAGER)
+                    theme_read(&e.paint.theme, &e.x);
+                break;
             case LeaveNotify:
                 cui_queue_event(e.paint.ui, (cui_event){.type = CUI_EVENT_POINTER_LEAVE});
                 break;
@@ -773,9 +818,11 @@ editor_main(void)
             next = time + 400;
         }
         if (dirty && !e.closing) {
+            e.redraw = false;
             draw(&e);
-            dirty = false;
+            dirty = e.redraw;
         }
+        if (dirty) continue;
         struct pollfd events = {ConnectionNumber(d), POLLIN, 0};
         poll(&events, 1, 100);
     }

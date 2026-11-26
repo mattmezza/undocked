@@ -74,7 +74,8 @@ x11_change(X11 *x, XEvent *event)
     XRRNotifyEvent *notify = (XRRNotifyEvent *)event;
     if (notify->subtype == RRNotify_OutputProperty) {
         XRROutputPropertyNotifyEvent *property = (XRROutputPropertyNotifyEvent *)event;
-        return property->property == XInternAtom(x->display, "EDID", True);
+        return property->property == XInternAtom(x->display, "EDID", True) ||
+               property->property == XInternAtom(x->display, "non-desktop", True);
     }
     return true;
 }
@@ -155,6 +156,21 @@ read_edid(X11 *x, RROutput id, Output *output)
     if (data) XFree(data);
 }
 
+static bool
+non_desktop(X11 *x, RROutput id)
+{
+    Atom name = XInternAtom(x->display, "non-desktop", True), type;
+    int format;
+    unsigned long count, after;
+    unsigned char *data = NULL;
+    bool other = false;
+    if (name && XRRGetOutputProperty(x->display, id, name, 0, 1, False, False,
+        AnyPropertyType, &type, &format, &count, &after, &data) == Success && count == 1 && data)
+        other = format == 32 && *(const unsigned long *)data != 0;
+    if (data) XFree(data);
+    return other;
+}
+
 static void
 scan_free(Scan *scan)
 {
@@ -187,7 +203,7 @@ scan_read(X11 *x, Scan *scan, bool refresh, char *error)
         RROutput id = scan->resources->outputs[i];
         XRROutputInfo *info = XRRGetOutputInfo(d, scan->resources, id);
         if (!info) continue;
-        if (info->connection == RR_Disconnected ||
+        if (info->connection == RR_Disconnected || (!info->crtc && non_desktop(x, id)) ||
             (info->connection == RR_UnknownConnection && !info->crtc && !info->nmode)) {
             XRRFreeOutputInfo(info);
             continue;

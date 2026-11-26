@@ -76,6 +76,7 @@ typedef struct {
     int remaining;
     char message[ERROR_SIZE];
     Topology topology;
+    Layout extended;
 } Reply;
 
 typedef struct Backend Backend;
@@ -99,10 +100,12 @@ bool same_mode(Mode, Mode);
 void dimensions(Placement, int *, int *);
 Layout current_layout(const Topology *);
 bool layout_equal(const Layout *, const Layout *);
+bool layout_mirrored(const Layout *);
 uint64_t topology_key(const Topology *);
 bool resolve_layout(const Topology *, const Layout *, bool, Layout *, char *);
 bool normalize_layout(const Topology *, Layout *, char *);
 bool suggest(const Topology *, Layout *, const char *, char *);
+bool extend_layout(const Reply *, Layout *, char *);
 Layout recovery_layout(const Topology *, bool lid_closed);
 bool lid_closed(void);
 

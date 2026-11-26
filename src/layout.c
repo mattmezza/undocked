@@ -44,6 +44,22 @@ layout_equal(const Layout *a, const Layout *b)
     return true;
 }
 
+bool
+layout_mirrored(const Layout *layout)
+{
+    const Placement *first = NULL;
+    int count = 0;
+    for (int i = 0; i < layout->count; i++) {
+        const Placement *p = &layout->output[i];
+        if (!p->enabled) continue;
+        count++;
+        if (!first) first = p;
+        else if (p->x != first->x || p->y != first->y || p->mode.width != first->mode.width ||
+                 p->mode.height != first->mode.height || p->rotation != first->rotation) return false;
+    }
+    return count >= 2;
+}
+
 uint64_t
 topology_key(const Topology *t)
 {
@@ -279,4 +295,14 @@ suggest(const Topology *t, Layout *layout, const char *kind, char *error)
         }
     }
     return normalize_layout(t, layout, error);
+}
+
+bool
+extend_layout(const Reply *live, Layout *layout, char *error)
+{
+    if (live->extended.count &&
+        resolve_layout(&live->topology, &live->extended, true, layout, error) &&
+        normalize_layout(&live->topology, layout, error)) return true;
+    *layout = current_layout(&live->topology);
+    return suggest(&live->topology, layout, "row", error);
 }

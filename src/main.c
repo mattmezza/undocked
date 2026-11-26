@@ -20,7 +20,7 @@ static const char usage[] =
     "  load FILE [--dry-run|--yes]         Apply a portable preset script\n"
     "  save NAME [--auto] [--replace]      Save the current layout as a script\n"
     "  auto NAME on|off                   Set automatic matching for a preset\n"
-    "  layout row|column|y|mirror [--dry-run|--yes]\n"
+    "  layout row|column|y|mirror|extend [--dry-run|--yes]\n"
     "  output PORT on|off|primary|mode WxH[@Hz]|rotate DEG|move X Y [--dry-run|--yes]\n"
     "  identify | keep | revert | recover | reload\n";
 
@@ -261,13 +261,27 @@ launch_main(void)
     }
     Reply reply;
     bool live = get(&reply);
+    const struct {const char *label, *kind;} layouts[] = {
+        {"Arrange displays in a row", "row"}, {"Stack displays vertically", "column"},
+        {"Arrange two displays above one", "y"}, {"Mirror displays", "mirror"},
+        {"Restore extended layout", "extend"},
+    };
     fputs("Open display editor\nIdentify displays\n", input);
+    if (live && !reply.remaining) {
+        for (size_t i = 0; i < sizeof layouts / sizeof layouts[0]; i++) {
+            Layout candidate = current_layout(&reply.topology);
+            bool supported = !strcmp(layouts[i].kind, "extend") ?
+                layout_mirrored(&candidate) : suggest(&reply.topology, &candidate, layouts[i].kind, error);
+            if (supported)
+                fprintf(input, "%s\n", layouts[i].label);
+        }
+    }
     if (live && reply.remaining) fputs("Keep display changes\nRevert display changes\n", input);
     char names[PRESETS][NAME];
     int count = preset_list(&config, names);
     for (int i = 0; i < count; i++) {
         Preset preset;
-        if (live && read_named(&config, names[i], &preset, error) &&
+        if (live && !reply.remaining && read_named(&config, names[i], &preset, error) &&
             match_preset(&config, &reply.topology, &preset, error))
             fprintf(input, "Switch to %s\n", names[i]);
     }
@@ -301,6 +315,17 @@ launch_main(void)
         request.command = APPLY;
         request.layout = preset.layout;
         strcpy(request.preset, preset.name);
+    }
+    for (size_t i = 0; !request.command && i < sizeof layouts / sizeof layouts[0]; i++) {
+        if (strcmp(choice, layouts[i].label)) continue;
+        if (!get(&reply)) return fail(reply.message);
+        request.layout = current_layout(&reply.topology);
+        bool found = !strcmp(layouts[i].kind, "extend") ? extend_layout(&reply, &request.layout, error) :
+            suggest(&reply.topology, &request.layout, layouts[i].kind, error);
+        if (!found) return fail(error);
+        request.command = APPLY;
+        request.expected = topology_key(&reply.topology);
+        request.flags = STRICT_PORTS;
     }
     if (!request.command) return 0;
     if (!rpc(&request, &reply, true)) {
@@ -368,7 +393,9 @@ main(int argc, char **argv)
             if (!strcmp(command, "layout")) {
                 if (!get(&reply)) return fail(reply.message);
                 Layout layout = current_layout(&reply.topology);
-                if (!suggest(&reply.topology, &layout, argv[2], error)) return fail(error);
+                bool found = !strcmp(argv[2], "extend") ? extend_layout(&reply, &layout, error) :
+                    suggest(&reply.topology, &layout, argv[2], error);
+                if (!found) return fail(error);
                 return submit(layout, topology_key(&reply.topology), NULL, dry, yes);
             }
             bool path = !strcmp(command, "load");

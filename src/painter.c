@@ -1,5 +1,6 @@
 #include "painter.h"
 
+#include <X11/Xatom.h>
 #include <X11/Xresource.h>
 #include <X11/Xutil.h>
 #include <stdio.h>
@@ -36,8 +37,16 @@ static XrmDatabase
 database(X11 *x)
 {
     XrmInitialize();
-    char *data = XResourceManagerString(x->display);
-    return data ? XrmGetStringDatabase(data) : NULL;
+    Atom type;
+    int format;
+    unsigned long count, after;
+    unsigned char *data = NULL;
+    XrmDatabase db = NULL;
+    if (XGetWindowProperty(x->display, x->root, XA_RESOURCE_MANAGER, 0, 262144, False, XA_STRING,
+        &type, &format, &count, &after, &data) == Success && format == 8 && !after && data)
+        db = XrmGetStringDatabase((char *)data);
+    if (data) XFree(data);
+    return db;
 }
 
 void
@@ -55,6 +64,9 @@ theme_read(Theme *theme, X11 *x)
     color(db, "mwm.selbg", &theme->accent);
     color(db, "mwm.selfg", &theme->on_accent);
     color(db, "mwm.systemwarn", &theme->warning);
+    if (theme->background.r == theme->panel.r && theme->background.g == theme->panel.g &&
+        theme->background.b == theme->panel.b)
+        theme->panel = cui_color_mix_oklab(theme->background, theme->border, .26f);
     color(db, "undocked.background", &theme->background);
     color(db, "undocked.panel", &theme->panel);
     color(db, "undocked.foreground", &theme->foreground);

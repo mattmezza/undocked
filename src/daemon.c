@@ -21,7 +21,7 @@ typedef struct {
     Backend backend;
     Config config;
     Topology topology, reported;
-    Layout previous;
+    Layout previous, extended;
     uint64_t checked;
     char reason[NAME], profile[NAME], status[ERROR_SIZE];
     long long settle, deadline, lid_check, next_tray, badges_until, last_resume;
@@ -231,10 +231,8 @@ paint_icon(Session *s)
         foreground = (cui_color){colors[0] / 257, colors[1] / 257, colors[2] / 257, 255};
     }
     if (data) XFree(data);
-    unsigned long bg = x11_color(attr.visual, theme.panel.r, theme.panel.g, theme.panel.b);
     unsigned long fg = x11_color(attr.visual, foreground.r, foreground.g, foreground.b);
-    XSetForeground(d, s->icon_gc, bg);
-    XFillRectangle(d, s->icon, s->icon_gc, 0, 0, (unsigned)attr.width, (unsigned)attr.height);
+    XClearWindow(d, s->icon);
     int size = attr.width < attr.height ? attr.width : attr.height;
     if (size >= 12) display_icon(&s->x, s->icon, s->icon_gc, (attr.width - size) / 2,
                                 (attr.height - size) / 2, size, fg);
@@ -338,6 +336,11 @@ apply_layout(Session *s, Layout layout, bool immediate, const char *reason, cons
         char recovery[ERROR_SIZE];
         if (!restore(s, recovery)) fprintf(stderr, "undocked: recovery failed: %s\n", recovery);
         return false;
+    }
+    if (layout_mirrored(&layout) && !layout_mirrored(&current)) s->extended = current;
+    if (!strcmp(reason, "apply")) {
+        s->checked = topology_key(&s->topology);
+        s->checked_lid = s->lid;
     }
     if (immediate) s->previous_valid = false;
     else s->deadline = now_ms() + s->config.confirm * 1000LL;
@@ -504,6 +507,7 @@ process(Session *s, const Request *request, Reply *reply)
     }
     if (reply->ok && request->command != GET) scan(s, error);
     reply->topology = s->topology;
+    reply->extended = s->extended;
     long long left = s->deadline - now_ms();
     reply->remaining = left > 0 ? (int)((left + 999) / 1000) : 0;
 }
