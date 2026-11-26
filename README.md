@@ -15,7 +15,7 @@ curl -fsSL https://raw.githubusercontent.com/mattmezza/undocked/main/install.sh 
 
 The installer verifies a checksum and installs a statically linked Linux binary
 for x86_64 or aarch64 in `~/.local/bin`. Run it again to upgrade, or pass a version
-with `sh -s -- v0.1.0`. Set `PREFIX` to choose another install prefix. You need
+with `sh -s -- v0.1.1`. Set `PREFIX` to choose another install prefix. You need
 an X11 session with RandR 1.3 or newer.
 
 Open the editor with `undocked`. For automatic switching, start the daemon from
@@ -23,31 +23,34 @@ your X session startup script. The applet uses the existing XEmbed tray in
 [mwm](https://github.com/mattmezza/mwm).
 
 ```sh
-undocked daemon --tray &
+undocked daemon &
 ```
 
 Left-click the tray icon for the editor, middle-click to identify screens, and
-right-click for the Launch picker. Omit `--tray` to run the watcher alone. The
-editor identifies itself as `Undocked` with an X11 dialog window type so mwm
-opens it centered and floating.
+right-click for the Launch picker. Set `tray = false` in the INI or start with
+`undocked daemon --no-tray` to run the watcher alone. The editor uses the
+`Undocked` window class and the X11 dialog type so mwm opens it centered and
+floating. The installer refreshes a running daemon in the current X session.
 
 ## Arrange displays
 
 - Drag the numbered displays to arrange them. Edges snap together. Use the arrow
   keys to move the selected display, or hold Shift for larger steps.
 - Click **Identify** to see the same numbers on the active screens. Connector
-  names appear on tiles and in the detail panel, including for disabled displays.
-- Select a display to change its resolution, refresh rate, orientation, primary
-  status, or power state. Pick **Mirror**, **Row**, **Column**, or **Two above**
-  for a starting layout.
+  names appear on the layout and in **Inspector**, including for disabled
+  displays.
+- Click a display tile to open the docked inspector and change its resolution,
+  refresh rate, orientation, primary status, or enabled state. Use **Mirror** or
+  one of the arrangement shortcuts below the canvas to start a layout.
 - Click **Apply** and then **Keep**. Undocked restores the previous layout if the
   countdown expires. If the old layout is unavailable, it tries a connected
   output at a supported mode.
-- Save the active layout with **Save preset**. Set **Autoapply** for the layout
-  you want when the same hardware is connected. The **Presets** menu can switch
-  layouts or change their automatic setting.
+- Open the **Presets** tab to load a saved layout or change its **Autoapply**
+  setting. **Save preset** opens the inline form and saves the active layout.
 
-![Undocked's save preset dialog with an Autoapply toggle](media/preset.png)
+![Undocked's docked inspector showing a connector, resolution, and refresh rate](media/inspector.png)
+
+![The Presets tab with two saved layouts and the inline new preset form](media/preset.png)
 
 ## Presets and configuration
 
@@ -76,18 +79,24 @@ after_change = if [ -r "$HOME/.fehbg" ]; then sh "$HOME/.fehbg"; fi
 
 Undocked ships Geist and Geist Mono. It inherits the mwm Xresources palette
 and supports `undocked.background`, `panel`, `foreground`, `muted`, `border`,
-`accent`, `onAccent`, `warning`, and `cornerRadius`. Set `undocked.font` and
-`undocked.mono` to font file paths, or use the respective INI settings.
+`accent`, `onAccent`, `warning`, and `cornerRadius`. Set `corner_radius` under
+`[ui]` to override the Xresources radius. The default is 4 px. Set
+`undocked.font` and `undocked.mono` to font file paths, or use the corresponding
+INI settings. Display numbers, connector names, resolutions, and refresh rates
+use the mono face.
 
 ## Launch and scripts
 
 Add this to [Launch](https://github.com/mattmezza/launch)'s `config.ini`.
-The picker includes the editor, Identify, compatible presets and arrangements,
-and pending confirmation actions.
+Search for a saved preset, Mirror or Extend, an arrangement, or an action for a
+specific connector such as **Disable DP-1** or **Make DP-1 primary**. Resolution
+and refresh-rate changes open a second picker with the connector's supported
+modes. Layout changes open Undocked for **Keep** or **Revert**, and both options
+are also available in Launch while confirmation is pending.
 
 ```ini
 [workflow Displays]
-keywords=monitor screen dock preset mirror resolution
+keywords=monitor screen dock preset mirror resolution enable disable refresh rate
 command=undocked launch
 ```
 
@@ -110,7 +119,7 @@ version, and commands report failure through their exit status.
 ## Build
 
 Source builds need a C11 toolchain, make, pkg-config, and the X11, RandR,
-FreeType, and HarfBuzz development libraries. CUI and the fonts are bundled.
+Xrender, FreeType, and HarfBuzz development libraries. CUI and the fonts are bundled.
 
 ```sh
 make
@@ -118,7 +127,7 @@ make check
 sudo make clean install
 ```
 
-`make check` uses Xvfb and xdotool. `make release name=v0.1.0` pushes a version
+`make check` uses Xvfb and xdotool. `make release name=v0.1.1` pushes a version
 tag. GitHub Actions builds, tests, and publishes the static binaries for both
 architectures with their checksums.
 
