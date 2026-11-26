@@ -1,0 +1,1433 @@
+/* SPDX-License-Identifier: MIT */
+#ifndef CUI_BRIDGE_H
+#define CUI_BRIDGE_H
+#include <stdint.h>
+#if defined(_WIN32)
+#if defined(CUI_BRIDGE_BUILD)
+#define CUI_BRIDGE_API __declspec(dllexport)
+#else
+#define CUI_BRIDGE_API __declspec(dllimport)
+#endif
+#else
+#define CUI_BRIDGE_API
+#endif
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#define CUI_BRIDGE_ABI_VERSION 1u
+#define CUI_BRIDGE_MAX_DEPTH 128u
+
+typedef struct cui_bridge_app cui_bridge_app;
+typedef struct {
+    uint32_t slot, generation;
+} cui_bridge_node;
+typedef struct {
+    float x, y, width, height;
+} cui_bridge_rect;
+/* Copied shadow authoring V1. Numeric RGBA is 0xRRGGBBAA; no borrowed fields.
+ * Only ROW/COLUMN/LABEL/BUTTON/INPUT/BADGE roots, not component parts/portals.
+ * Layer size24: offsets0/4, sigma8, spread12, kind16, rgba20.
+ * Style size224: header0/4/8/12, radii16/20/24/28, layers32.
+ * Active layers require finite offsets/spread[-4096,4096], sigma[0,256],
+ * kind0/1 and finite radii[0,16384]. Inactive layer slots are ignored.
+ * Empty lists retain Core's permissive no-paint radii policy. */
+typedef struct {
+    float offset_x, offset_y, sigma, spread;
+    uint32_t kind, rgba; /* kind0 DROP,1 INSET; sigma is NOT CSS blur radius. */
+} cui_bridge_box_shadow_v1;
+typedef struct {
+    uint32_t struct_size, schema_version, count, reserved; /* exact size,1,0..8,0 */
+    float top_left, top_right, bottom_left, bottom_right;
+    cui_bridge_box_shadow_v1 layers[8];
+} cui_bridge_box_shadows_v1;
+/* Additive semantic targets. Query reports declared capability, never presence.
+ * Record sizes16, schema1, reserved0. MAIN aliases one documented physical role.
+ * New operations require the reviewed Row/Column ancestry (RadioGroup owns ITEM).
+ * Old six-root setters and allowlist are unchanged. */
+enum {
+    CUI_BRIDGE_SHADOW_ROOT = 0,
+    CUI_BRIDGE_SHADOW_MAIN = 1,
+    CUI_BRIDGE_SHADOW_INDICATOR = 2,
+    CUI_BRIDGE_SHADOW_TRACK = 3,
+    CUI_BRIDGE_SHADOW_THUMB = 4
+};
+enum {
+    CUI_BRIDGE_SHADOW_SUPPORTED = 1,
+    CUI_BRIDGE_SHADOW_NAMED_INDICATOR = 2,
+    CUI_BRIDGE_SHADOW_CONDITIONAL_SUBMISSION = 4
+};
+typedef struct {
+    uint32_t struct_size, schema_version, role, reserved;
+} cui_bridge_shadow_target_v1;
+typedef struct {
+    uint32_t struct_size, schema_version, canonical_role, flags;
+} cui_bridge_shadow_target_info_v1;
+typedef enum {
+    CUI_BRIDGE_OK = 0,
+    CUI_BRIDGE_EMPTY,
+    CUI_BRIDGE_CLOSED,
+    CUI_BRIDGE_INVALID_ARGUMENT,
+    CUI_BRIDGE_STALE_HANDLE,
+    CUI_BRIDGE_CAPACITY,
+    CUI_BRIDGE_OUT_OF_MEMORY,
+    CUI_BRIDGE_INVALID_UTF8,
+    CUI_BRIDGE_INVALID_STATE,
+    CUI_BRIDGE_BACKEND_UNAVAILABLE,
+    CUI_BRIDGE_CORE_ERROR
+} cui_bridge_status;
+typedef enum { CUI_BRIDGE_BACKEND_NONE = 0, CUI_BRIDGE_BACKEND_SDL = 1 } cui_bridge_backend;
+CUI_BRIDGE_API uint32_t cui_bridge_theme_preset_count(void);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_theme_preset_name(uint32_t index, char *out_utf8,
+                                                              uint32_t capacity,
+                                                              uint32_t *out_length);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_set_theme_preset(cui_bridge_app *, uint32_t index);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_get_theme_preset(const cui_bridge_app *,
+                                                             uint32_t *out_index);
+/* Clipboard calls must run on the SDL owner thread, outside a bridge step.
+ * Headless apps report BACKEND_UNAVAILABLE. Reads copy before native storage expires. */
+CUI_BRIDGE_API cui_bridge_status cui_bridge_clipboard_set(cui_bridge_app *, const char *text_utf8);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_clipboard_get(cui_bridge_app *, char *out_utf8,
+                                                          uint32_t capacity, uint32_t *out_length);
+typedef enum {
+    CUI_BRIDGE_ROW = 1,
+    CUI_BRIDGE_COLUMN,
+    CUI_BRIDGE_LABEL,
+    CUI_BRIDGE_BUTTON,
+    CUI_BRIDGE_CHECKBOX,
+    CUI_BRIDGE_RADIO,
+    CUI_BRIDGE_SWITCH,
+    CUI_BRIDGE_TOGGLE,
+    CUI_BRIDGE_SLIDER,
+    CUI_BRIDGE_PROGRESS,
+    CUI_BRIDGE_BADGE,
+    CUI_BRIDGE_INPUT,
+    CUI_BRIDGE_TEXTAREA,
+    CUI_BRIDGE_NUMBER_INPUT,
+    CUI_BRIDGE_COLLAPSIBLE,
+    CUI_BRIDGE_ALERT,
+    CUI_BRIDGE_RADIO_GROUP,
+    CUI_BRIDGE_TABS,
+    CUI_BRIDGE_ACCORDION,
+    CUI_BRIDGE_ITEM,
+    CUI_BRIDGE_SELECT,
+    CUI_BRIDGE_COMBOBOX,
+    CUI_BRIDGE_DROPDOWN_BUTTON,
+    CUI_BRIDGE_DIALOG,
+    CUI_BRIDGE_ALERT_DIALOG,
+    CUI_BRIDGE_SHEET,
+    CUI_BRIDGE_POPOVER,
+    CUI_BRIDGE_TOOLTIP,
+    CUI_BRIDGE_HOVER_CARD,
+    CUI_BRIDGE_AVATAR,
+    CUI_BRIDGE_BUBBLE,
+    CUI_BRIDGE_EMPTY_VIEW,
+    CUI_BRIDGE_GROUP_BOX,
+    CUI_BRIDGE_KBD,
+    CUI_BRIDGE_SKELETON,
+    CUI_BRIDGE_SPINNER,
+    CUI_BRIDGE_TAG,
+    CUI_BRIDGE_MARKER,
+    CUI_BRIDGE_SHIMMER,
+    CUI_BRIDGE_LIST,
+    CUI_BRIDGE_MENU,
+    CUI_BRIDGE_PAGINATION,
+    CUI_BRIDGE_RATING,
+    CUI_BRIDGE_STEPPER,
+    CUI_BRIDGE_DESCRIPTION_LIST,
+    CUI_BRIDGE_SCROLLABLE,
+    CUI_BRIDGE_STATUS_BAR,
+    CUI_BRIDGE_TOOLBAR,
+    CUI_BRIDGE_TITLE_BAR,
+    CUI_BRIDGE_ICON,
+    CUI_BRIDGE_MESSAGE,
+    CUI_BRIDGE_ATTACHMENT,
+    CUI_BRIDGE_IMAGE,
+    CUI_BRIDGE_TREE,
+    CUI_BRIDGE_TIME_FIELD,
+    CUI_BRIDGE_COLOR_PICKER,
+    CUI_BRIDGE_CALENDAR,
+    CUI_BRIDGE_DATE_PICKER,
+    CUI_BRIDGE_OTP_INPUT,
+    CUI_BRIDGE_FORM,
+    CUI_BRIDGE_INPUT_GROUP,
+    CUI_BRIDGE_NOTIFICATION,
+    CUI_BRIDGE_FOCUS_TRAP,
+    CUI_BRIDGE_MESSAGE_SCROLLER,
+    CUI_BRIDGE_CAROUSEL,
+    CUI_BRIDGE_RESIZABLE,
+    CUI_BRIDGE_TEXT_VIEW,
+    CUI_BRIDGE_EDITOR,
+    CUI_BRIDGE_CHART,
+    CUI_BRIDGE_TABLE,
+    CUI_BRIDGE_DATA_TABLE,
+    CUI_BRIDGE_PLOT,
+    CUI_BRIDGE_COMMAND,
+    CUI_BRIDGE_VIRTUAL_LIST,
+    CUI_BRIDGE_SIDEBAR,
+    CUI_BRIDGE_ROOT_VIEW,
+    CUI_BRIDGE_SPEECH,
+    CUI_BRIDGE_QUESTIONNAIRE,
+    CUI_BRIDGE_DOCK,
+    CUI_BRIDGE_SETTINGS,
+    CUI_BRIDGE_SLIDER_MODEL = 81,    /* Additive controlled route; use versioned factory. */
+    CUI_BRIDGE_BADGE_CONFIGURED = 82 /* Use the Badge V1 factory. */
+} cui_bridge_kind;
+/* Optional responsive presentation for the existing Skeleton kind35.
+ * Without explicit configuration, legacy construction and visual size apply. */
+#define CUI_BRIDGE_SKELETON_V1 1u
+enum { CUI_BRIDGE_SKELETON_FIXED, CUI_BRIDGE_SKELETON_FRACTION, CUI_BRIDGE_SKELETON_GROW };
+enum {
+    CUI_BRIDGE_SKELETON_SECONDARY = 1u,
+    CUI_BRIDGE_SKELETON_CUSTOM_COLOR = 2u,
+    CUI_BRIDGE_SKELETON_REDUCED_MOTION = 4u
+};
+typedef struct {
+    uint32_t struct_size, schema_version, flags, width_mode;
+    /* FIXED: (0,16384], FRACTION: (0,1], GROW: 0. Height: (0,16384].
+     * Max width/radius: [0,16384]; FRACTION requires zero max width.
+     * Duration: [0,60] seconds; zero selects two. */
+    float width, height, max_width, radius, duration;
+    uint32_t background_rgba; /* Numeric 0xRRGGBBAA; zero if CUSTOM_COLOR is unset. */
+} cui_bridge_skeleton_config_v1;
+typedef struct {
+    uint32_t struct_size, schema_version;
+    uint64_t frame_sequence;
+    double core_time, next_wake_seconds; /* Absolute Core clock; zero deadline means static. */
+    float phase, opacity;
+} cui_bridge_skeleton_presentation_v1;
+CUI_BRIDGE_API uint32_t cui_bridge_skeleton_versions(void);
+CUI_BRIDGE_API uint32_t cui_bridge_skeleton_config_size_v1(void);
+CUI_BRIDGE_API uint32_t cui_bridge_skeleton_presentation_size_v1(void);
+/* Existing Skeleton node, owner thread, outside step. Configuration is copied.
+ * Period or reduced-motion changes restart motion; replacement styling preserves it.
+ * The legacy visual-size setter rejects configured nodes. */
+CUI_BRIDGE_API cui_bridge_status cui_bridge_skeleton_configure_v1(
+    cui_bridge_app *, cui_bridge_node, const cui_bridge_skeleton_config_v1 *);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_skeleton_get_config_v1(cui_bridge_app *,
+                                                                   cui_bridge_node,
+                                                                   cui_bridge_skeleton_config_v1 *);
+/* Read-only sample from the latest successful step. EMPTY until sampled, after
+ * reconfiguration, omission, or a failed frame. All read errors leave output
+ * untouched. The deadline does not change the native runner's cadence. */
+CUI_BRIDGE_API cui_bridge_status cui_bridge_skeleton_get_presentation_v1(
+    cui_bridge_app *, cui_bridge_node, cui_bridge_skeleton_presentation_v1 *);
+/* Optional copied presentation for the existing Pagination kind. */
+#define CUI_BRIDGE_PAGINATION_V1 1u
+enum { CUI_BRIDGE_PAGINATION_LABEL_BYTES = 128 };
+enum {
+    CUI_BRIDGE_PAGINATION_COUNTER = 1u,
+    CUI_BRIDGE_PAGINATION_ICON_ONLY = 2u,
+    CUI_BRIDGE_PAGINATION_CHEVRONS = 4u,
+    CUI_BRIDGE_PAGINATION_JUMP_MENU = 8u
+};
+typedef struct {
+    uint32_t struct_size, schema_version, flags, visible_pages;
+    /* Zero uses the default page window or a single row, respectively.
+     * Otherwise visible_pages is 5..32 and available_width is in (0,32768]. */
+    float available_width;
+    /* Single-line UTF-8, NUL-terminated within each field. Empty uses a default name. */
+    char group[CUI_BRIDGE_PAGINATION_LABEL_BYTES], first[CUI_BRIDGE_PAGINATION_LABEL_BYTES],
+        previous[CUI_BRIDGE_PAGINATION_LABEL_BYTES], next[CUI_BRIDGE_PAGINATION_LABEL_BYTES],
+        last[CUI_BRIDGE_PAGINATION_LABEL_BYTES], earlier_pages[CUI_BRIDGE_PAGINATION_LABEL_BYTES],
+        later_pages[CUI_BRIDGE_PAGINATION_LABEL_BYTES];
+} cui_bridge_pagination_config_v1;
+CUI_BRIDGE_API uint32_t cui_bridge_pagination_versions(void);
+CUI_BRIDGE_API uint32_t cui_bridge_pagination_config_size_v1(void);
+/* Owner thread, outside step. Copies V1 or clears the override with NULL.
+ * ICON_ONLY takes priority. CHEVRONS shows labeled arrows without First/Last.
+ * Both arrow layouts show localized pointer hover labels inside the host viewport.
+ * JUMP_MENU applies in numbered mode and uses the current host viewport.
+ * The shared design-size setter, owner page, total and CHANGE event are independent. */
+CUI_BRIDGE_API cui_bridge_status cui_bridge_pagination_configure_v1(
+    cui_bridge_app *, cui_bridge_node, const cui_bridge_pagination_config_v1 *);
+/* Caller initializes size and schema. EMPTY if no override. Errors leave out untouched. */
+CUI_BRIDGE_API cui_bridge_status cui_bridge_pagination_get_config_v1(
+    cui_bridge_app *, cui_bridge_node, cui_bridge_pagination_config_v1 *);
+/* Optional entry points, independent of the V1 wire and named design size.
+ * Owner thread outside step. Set [1,512] logical px to override named sizing,
+ * or zero to restore it. No change event. Get returns zero when cleared;
+ * errors leave out untouched. */
+CUI_BRIDGE_API cui_bridge_status cui_bridge_pagination_set_custom_size(cui_bridge_app *,
+                                                                       cui_bridge_node, float);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_pagination_get_custom_size(cui_bridge_app *,
+                                                                       cui_bridge_node, float *);
+/* Unreleased controlled Slider V1. Independent request FIFO; old Slider scalar
+ * setters/events/CHANGE/autocommit are unchanged. All records own their values,
+ * contain no pointers and require exact size/schema1/reserved0. New language
+ * builders/native numeric delivery/V2 gradient adapters are not implemented. */
+#define CUI_BRIDGE_SLIDER_MODEL_V1 1u
+enum { CUI_BRIDGE_SLIDER_SINGLE, CUI_BRIDGE_SLIDER_RANGE };
+enum { CUI_BRIDGE_SLIDER_LINEAR, CUI_BRIDGE_SLIDER_LOGARITHMIC };
+enum { CUI_BRIDGE_SLIDER_HORIZONTAL, CUI_BRIDGE_SLIDER_VERTICAL };
+enum { CUI_BRIDGE_SLIDER_FIXED, CUI_BRIDGE_SLIDER_PARENT };
+enum {
+    CUI_BRIDGE_SLIDER_REQUESTS = 1u,
+    CUI_BRIDGE_SLIDER_READONLY = 2u,
+    CUI_BRIDGE_SLIDER_REVERSE_FILL = 4u,
+    CUI_BRIDGE_SLIDER_REDUCED_MOTION = 8u,
+    CUI_BRIDGE_SLIDER_HIDE_FOCUS = 16u
+};
+enum {
+    CUI_BRIDGE_SLIDER_BEGIN,
+    CUI_BRIDGE_SLIDER_UPDATE,
+    CUI_BRIDGE_SLIDER_COMMIT,
+    CUI_BRIDGE_SLIDER_CANCEL
+};
+enum {
+    CUI_BRIDGE_SLIDER_ROOT,
+    CUI_BRIDGE_SLIDER_TRACK,
+    CUI_BRIDGE_SLIDER_FILL,
+    CUI_BRIDGE_SLIDER_START_THUMB,
+    CUI_BRIDGE_SLIDER_END_THUMB
+};
+enum {
+    CUI_BRIDGE_SLIDER_REASON_INPUT,
+    CUI_BRIDGE_SLIDER_REASON_DISABLED,
+    CUI_BRIDGE_SLIDER_REASON_READONLY,
+    CUI_BRIDGE_SLIDER_REASON_ZERO_SPAN,
+    CUI_BRIDGE_SLIDER_REASON_SOURCE_REPLACED,
+    CUI_BRIDGE_SLIDER_REASON_DOMAIN_CHANGED,
+    CUI_BRIDGE_SLIDER_REASON_MODE_CHANGED,
+    CUI_BRIDGE_SLIDER_REASON_AXIS_CHANGED,
+    CUI_BRIDGE_SLIDER_REASON_OMITTED,
+    CUI_BRIDGE_SLIDER_REASON_CAPTURE_LOST
+};
+enum {
+    CUI_BRIDGE_SLIDER_EVENT_REQUEST = 1,
+    CUI_BRIDGE_SLIDER_EVENT_COMMIT = 3,
+    CUI_BRIDGE_SLIDER_EVENT_LIFECYCLE = 5
+};
+enum {
+    CUI_BRIDGE_SLIDER_SOURCE_UNKNOWN,
+    CUI_BRIDGE_SLIDER_SOURCE_PROGRAMMATIC,
+    CUI_BRIDGE_SLIDER_SOURCE_POINTER,
+    CUI_BRIDGE_SLIDER_SOURCE_KEYBOARD,
+    CUI_BRIDGE_SLIDER_SOURCE_ACCESSIBILITY
+};
+enum {
+    CUI_BRIDGE_SLIDER_HAS_FRAME = 1u,
+    CUI_BRIDGE_SLIDER_HAS_INDEX = 2u,
+    CUI_BRIDGE_SLIDER_HAS_SOURCE = 4u
+};
+enum { CUI_BRIDGE_SLIDER_HAS_INPUT = 1u, CUI_BRIDGE_SLIDER_HAS_NUMERIC_VALUE = 2u };
+enum {
+    CUI_BRIDGE_SLIDER_INPUT_MOVE = 0,
+    CUI_BRIDGE_SLIDER_INPUT_DOWN = 1,
+    CUI_BRIDGE_SLIDER_INPUT_UP = 2,
+    CUI_BRIDGE_SLIDER_INPUT_KEY = 3,
+    CUI_BRIDGE_SLIDER_INPUT_CANCEL = 7,
+    CUI_BRIDGE_SLIDER_INPUT_ACCESSIBILITY = 13
+};
+enum {
+    CUI_BRIDGE_SLIDER_KEY_NONE = 0,
+    CUI_BRIDGE_SLIDER_KEY_ESCAPE = 4,
+    CUI_BRIDGE_SLIDER_KEY_LEFT = 5,
+    CUI_BRIDGE_SLIDER_KEY_RIGHT = 6,
+    CUI_BRIDGE_SLIDER_KEY_UP = 7,
+    CUI_BRIDGE_SLIDER_KEY_DOWN = 8,
+    CUI_BRIDGE_SLIDER_KEY_HOME = 9,
+    CUI_BRIDGE_SLIDER_KEY_END = 10,
+    CUI_BRIDGE_SLIDER_KEY_PAGEUP = 19,
+    CUI_BRIDGE_SLIDER_KEY_PAGEDOWN = 20
+};
+enum { CUI_BRIDGE_SLIDER_MOUSE, CUI_BRIDGE_SLIDER_TOUCH, CUI_BRIDGE_SLIDER_PEN };
+enum { CUI_BRIDGE_SLIDER_PRIMARY, CUI_BRIDGE_SLIDER_SECONDARY, CUI_BRIDGE_SLIDER_MIDDLE };
+enum {
+    CUI_BRIDGE_SLIDER_INCREMENT = 2,
+    CUI_BRIDGE_SLIDER_DECREMENT = 3,
+    CUI_BRIDGE_SLIDER_SET_VALUE = 4
+};
+enum {
+    CUI_BRIDGE_SLIDER_RENDER_OK,
+    CUI_BRIDGE_SLIDER_RENDER_INVALID_ARGUMENT,
+    CUI_BRIDGE_SLIDER_RENDER_INVALID_STATE,
+    CUI_BRIDGE_SLIDER_RENDER_UNSUPPORTED,
+    CUI_BRIDGE_SLIDER_RENDER_BASE_REJECTED,
+    CUI_BRIDGE_SLIDER_RENDER_CORE_FAILURE
+};
+typedef struct {
+    uint32_t kind, reserved;
+    double start, end;
+} cui_bridge_slider_value_v1;
+typedef struct {
+    double minimum, maximum, step;
+    uint32_t scale, reserved;
+} cui_bridge_slider_domain_v1;
+typedef struct {
+    uint32_t struct_size, schema_version, flags, orientation;
+    uint64_t source_generation;
+    cui_bridge_slider_domain_v1 domain;
+    float rem, length;
+    uint32_t layout, reserved;
+} cui_bridge_slider_config_v1;
+typedef struct {
+    uint32_t struct_size, schema_version, capacity, reserved;
+} cui_bridge_slider_queue_options_v1;
+typedef struct {
+    uint32_t struct_size, schema_version;
+    uint64_t app_epoch;
+    cui_bridge_node node;
+    uint64_t source_generation, configuration_revision, submission_frame, request_sequence;
+} cui_bridge_slider_receipt_v1;
+typedef struct {
+    uint32_t type, flags, key, modifiers;
+    /* modifiers uses the named CUI_BRIDGE_MOD_SHIFT/CTRL/ALT/META bits below;
+     * unknown source bits fail publication rather than guessing a vocabulary. */
+    float x, y;
+    uint32_t repeat, pointer_type, pointer_button, accessibility_action;
+    uint64_t pointer_id, pointer_device, accessibility_target;
+    double accessibility_value;
+} cui_bridge_slider_input_v1;
+typedef struct {
+    uint32_t struct_size, schema_version, phase, reason;
+    uint32_t thumb, event_kind, event_source, event_flags;
+    cui_bridge_slider_receipt_v1 receipt;
+    uint64_t event_target, event_frame, event_index;
+    cui_bridge_slider_value_v1 current, requested;
+    cui_bridge_slider_domain_v1 domain, gesture_domain;
+    cui_bridge_slider_input_v1 input;
+} cui_bridge_slider_request_v1;
+typedef struct {
+    uint32_t struct_size, schema_version, render_status, reserved;
+    double core_time, next_wake_seconds;
+} cui_bridge_slider_presentation_v1;
+CUI_BRIDGE_API uint32_t cui_bridge_slider_model_versions(void);
+CUI_BRIDGE_API uint32_t cui_bridge_slider_config_v1_size(void);
+CUI_BRIDGE_API uint32_t cui_bridge_slider_value_v1_size(void);
+CUI_BRIDGE_API uint32_t cui_bridge_slider_receipt_v1_size(void);
+CUI_BRIDGE_API uint32_t cui_bridge_slider_request_v1_size(void);
+CUI_BRIDGE_API uint32_t cui_bridge_slider_presentation_v1_size(void);
+/* Handles/receipts belong to one matching loaded bridge image/module instance;
+ * cross-image mixing is unsupported. Epochs are unique within that instance,
+ * not a process-global security boundary across duplicate libraries/modules.
+ * UI-owner OS thread remains alive until destroy; serialize calls, never race
+ * destroy. Enable lazily owns capacity1..4096 (0=>4096); same-size reenable is
+ * idempotent. Default/shared WASM unsupported; explicit unshared builds require
+ * actual FINAL module verification, not compiler flags alone. Versions bit0
+ * advertises V1. Unsupported new operations return BACKEND_UNAVAILABLE. */
+CUI_BRIDGE_API cui_bridge_status cui_bridge_slider_queue_enable_v1(
+    cui_bridge_app *, uint32_t, const cui_bridge_slider_queue_options_v1 *);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_slider_model_create_v1(
+    cui_bridge_app *, cui_bridge_node parent, const char *key_utf8, uint32_t config_size,
+    const cui_bridge_slider_config_v1 *, uint32_t value_size, const cui_bridge_slider_value_v1 *,
+    cui_bridge_node *out);
+/* Configure validates complete config+pair atomically; direct replacements
+ * revise receipt authority, retaining the reducer for captured CANCEL. */
+CUI_BRIDGE_API cui_bridge_status cui_bridge_slider_model_configure_v1(
+    cui_bridge_app *, cui_bridge_node, uint32_t, const cui_bridge_slider_config_v1 *, uint32_t,
+    const cui_bridge_slider_value_v1 *);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_slider_model_get_config_v1(
+    cui_bridge_app *, cui_bridge_node, uint32_t, cui_bridge_slider_config_v1 *out);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_slider_model_set_value_v1(
+    cui_bridge_app *, cui_bridge_node, uint32_t, const cui_bridge_slider_value_v1 *);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_slider_model_get_value_v1(
+    cui_bridge_app *, cui_bridge_node, uint32_t, cui_bridge_slider_value_v1 *out);
+/* Poll owns one immutable copy, never invokes a callback or drains legacy FIFO.
+ * Invalid size preserves queue/output; valid poll may prune removed origins.
+ * Copied readability survives frames/dispose; acceptance authority does not. */
+CUI_BRIDGE_API cui_bridge_status
+cui_bridge_poll_slider_request_v1(cui_bridge_app *, uint32_t, cui_bridge_slider_request_v1 *out);
+/* UI thread outside step; after-frame is allowed. Checks live full receipt,
+ * latest admitted painted state-frame, configuration/source and increasing
+ * issued sequence. Explicit whole pair may differ from proposal. No autoaccept,
+ * retroactive paint, CHANGE notification or rollback of already delivered work.
+ * Invalid/stale/unsupported leaves output/queue/owner unchanged. */
+CUI_BRIDGE_API cui_bridge_status cui_bridge_accept_slider_request_v1(
+    cui_bridge_app *, uint32_t, const cui_bridge_slider_receipt_v1 *, uint32_t,
+    const cui_bridge_slider_value_v1 *);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_slider_model_get_presentation_v1(
+    cui_bridge_app *, cui_bridge_node, uint32_t, cui_bridge_slider_presentation_v1 *out);
+/* Last completed actual geometry, never ID-derived presence. Absent=>EMPTY and
+ * output unchanged. Presentation deadlines use absolute accumulated Core time. */
+CUI_BRIDGE_API cui_bridge_status cui_bridge_slider_model_part_bounds_v1(cui_bridge_app *,
+                                                                        cui_bridge_node,
+                                                                        uint32_t part,
+                                                                        cui_bridge_rect *out);
+
+CUI_BRIDGE_API cui_bridge_status cui_bridge_settings_set_query(cui_bridge_app *,
+                                                               cui_bridge_node settings,
+                                                               const char *query_utf8);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_settings_get_page(cui_bridge_app *,
+                                                              cui_bridge_node settings,
+                                                              cui_bridge_node *out_page);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_settings_set_page(cui_bridge_app *,
+                                                              cui_bridge_node settings,
+                                                              cui_bridge_node page);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_settings_reset_page(cui_bridge_app *,
+                                                                cui_bridge_node settings,
+                                                                cui_bridge_node page);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_settings_field_bounds(cui_bridge_app *,
+                                                                  cui_bridge_node settings,
+                                                                  cui_bridge_node field,
+                                                                  cui_bridge_rect *out_bounds);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_dock_activate(cui_bridge_app *, cui_bridge_node dock,
+                                                          cui_bridge_node panel);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_dock_move_split(
+    cui_bridge_app *, cui_bridge_node dock, cui_bridge_node panel, cui_bridge_node reference,
+    uint32_t axis, double ratio, uint32_t before); /* axis 0 horizontal, 1 vertical */
+CUI_BRIDGE_API cui_bridge_status cui_bridge_dock_get_active(cui_bridge_app *, cui_bridge_node dock,
+                                                            cui_bridge_node *out_panel);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_dock_panel_bounds(cui_bridge_app *,
+                                                              cui_bridge_node dock,
+                                                              cui_bridge_node panel,
+                                                              cui_bridge_rect *out_bounds);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_dock_serialize(cui_bridge_app *, cui_bridge_node dock,
+                                                           char *destination, uint32_t capacity,
+                                                           uint32_t *required_capacity);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_questionnaire_set_question(cui_bridge_app *,
+                                                                       cui_bridge_node question,
+                                                                       uint32_t required,
+                                                                       uint32_t multiple);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_questionnaire_get_state(cui_bridge_app *,
+                                                                    cui_bridge_node questionnaire,
+                                                                    cui_bridge_node *current,
+                                                                    uint32_t *complete);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_questionnaire_choice_selected(cui_bridge_app *,
+                                                                          cui_bridge_node choice,
+                                                                          uint32_t *selected);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_questionnaire_next(cui_bridge_app *,
+                                                               cui_bridge_node questionnaire);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_questionnaire_previous(cui_bridge_app *,
+                                                                   cui_bridge_node questionnaire);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_questionnaire_submit(cui_bridge_app *,
+                                                                 cui_bridge_node questionnaire);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_speech_start(cui_bridge_app *, cui_bridge_node);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_speech_report(cui_bridge_app *, cui_bridge_node,
+                                                          const char *text_utf8,
+                                                          uint32_t final_phrase);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_speech_finish(cui_bridge_app *, cui_bridge_node);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_speech_transcript(cui_bridge_app *, cui_bridge_node,
+                                                              char *out_utf8, uint32_t capacity,
+                                                              uint32_t *out_length);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_set_root_padding(cui_bridge_app *,
+                                                             cui_bridge_node root_view,
+                                                             float padding);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_command_item_bounds(cui_bridge_app *,
+                                                                cui_bridge_node command,
+                                                                cui_bridge_node item,
+                                                                cui_bridge_rect *out_bounds);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_virtual_list_item_bounds(cui_bridge_app *,
+                                                                     cui_bridge_node list,
+                                                                     cui_bridge_node item,
+                                                                     cui_bridge_rect *out_bounds);
+typedef struct {
+    double x, y;
+} cui_bridge_plot_point;
+CUI_BRIDGE_API cui_bridge_status cui_bridge_plot_set_points(cui_bridge_app *, cui_bridge_node,
+                                                            const cui_bridge_plot_point *points,
+                                                            uint32_t count);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_plot_get_point(cui_bridge_app *, cui_bridge_node,
+                                                           uint32_t index,
+                                                           cui_bridge_plot_point *out_point);
+typedef struct {
+    const char *label_utf8;
+    double value;
+} cui_bridge_chart_datum;
+CUI_BRIDGE_API cui_bridge_status cui_bridge_chart_set_data(cui_bridge_app *, cui_bridge_node,
+                                                           const cui_bridge_chart_datum *,
+                                                           uint32_t count);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_chart_set_kind(cui_bridge_app *, cui_bridge_node,
+                                                           uint32_t kind);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_chart_get_datum(cui_bridge_app *, cui_bridge_node,
+                                                            uint32_t index, char *label,
+                                                            uint32_t capacity,
+                                                            uint32_t *required_capacity,
+                                                            double *value);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_data_table_set(cui_bridge_app *, cui_bridge_node,
+                                                           const char *const *headers,
+                                                           uint32_t column_count,
+                                                           const char *const *cells,
+                                                           uint32_t row_count);
+/* Transactionally copies headers, cells and distinct nonzero row keys. The
+ * existing limits of 16 columns, 32 rows and 128 bytes per string apply.
+ * Preserves vertical position by key and within-row offset (old index if
+ * removed), clamped to the new viewport. Surviving selection, keyboard cursor
+ * and sort column retain their identities. A replacement emits no event.
+ * get_state and change events report the selected row key (zero if none).
+ * Cell access and bounds still use zero-based indices in the supplied data.
+ * The legacy setter keeps assigning keys 1..row_count and resetting state. */
+CUI_BRIDGE_API cui_bridge_status cui_bridge_data_table_set_keyed(
+    cui_bridge_app *, cui_bridge_node, const char *const *headers, uint32_t column_count,
+    const char *const *cells, const uint32_t *row_keys, uint32_t row_count);
+/* Maximum per table, independent of available app-wide storage. A runtime
+ * loaded provider supports this extension when it exports both V1 functions. */
+CUI_BRIDGE_API uint32_t cui_bridge_data_table_max_row_capacity_v1(void);
+/* Same copying and interaction rules as set_keyed. Owner thread, between
+ * steps. Capacity must be nonzero and at least row_count. Pass NULL for
+ * cells and keys with zero rows. Allocates for submitted rows, and preserves
+ * the 16-column and 128-byte string limits. The provider row limit and the
+ * app-wide 32 MiB retained opt-in allocation budget return CAPACITY when
+ * exceeded. Allocation failure returns OUT_OF_MEMORY. Any failure preserves
+ * the old matrix, interaction state and unclaimed paging edge. A successful
+ * ordinary set/set_keyed replacement returns the table to capacity 32. */
+CUI_BRIDGE_API cui_bridge_status cui_bridge_data_table_set_keyed_capacity_v1(
+    cui_bridge_app *, cui_bridge_node, const char *const *headers, uint32_t column_count,
+    const char *const *cells, const uint32_t *row_keys, uint32_t row_count, uint32_t row_capacity);
+/* Retained near-end demand, copied after a successful step. The visible
+ * window is [visible_begin, visible_end) in the supplied matrix, without
+ * overscan. The last row key is zero for an empty matrix. A local key does
+ * not describe a remote service cursor. Capacity is the active matrix's
+ * row capacity. The V1 record is 32 bytes. */
+typedef struct {
+    uint64_t frame;
+    uint32_t row_count, visible_begin, visible_end, last_row_key, capacity, reserved;
+} cui_bridge_data_table_load_more_v1;
+CUI_BRIDGE_API uint32_t cui_bridge_data_table_load_more_size_v1(void);
+/* Owner thread, between steps, on a DataTable with bound columns. Off by
+ * default. Pass enabled 0 or 1 and threshold 0..32 remaining rows. Changing
+ * policy clears an unclaimed edge; applying the same values is idempotent.
+ * Successful data replacement preserves policy and clears the old edge.
+ * Disabled or full tables do not raise new edges. The application owns
+ * in-flight work, cancellation and stale-response checks. */
+CUI_BRIDGE_API cui_bridge_status cui_bridge_data_table_configure_load_more_v1(cui_bridge_app *,
+                                                                              cui_bridge_node,
+                                                                              uint32_t enabled,
+                                                                              uint32_t threshold);
+/* Consumes one pending edge on OK. EMPTY or error leaves out unchanged.
+ * Pass the exact V1 size. At most one unclaimed edge is retained per table.
+ * Polling does not dispatch callbacks or change any interaction state. */
+CUI_BRIDGE_API cui_bridge_status cui_bridge_data_table_poll_load_more_v1(
+    cui_bridge_app *, cui_bridge_node, uint32_t out_size, cui_bridge_data_table_load_more_v1 *out);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_data_table_get_cell(cui_bridge_app *, cui_bridge_node,
+                                                                uint32_t row, uint32_t column,
+                                                                char *destination,
+                                                                uint32_t capacity,
+                                                                uint32_t *required_capacity);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_data_table_get_state(cui_bridge_app *, cui_bridge_node,
+                                                                 uint32_t *row, uint32_t *column,
+                                                                 uint32_t *sort_column,
+                                                                 uint32_t *sort_direction);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_data_table_set_selection_mode(
+    cui_bridge_app *, cui_bridge_node, uint32_t mode); /* 0 row, 1 column, 2 cell */
+CUI_BRIDGE_API cui_bridge_status cui_bridge_data_table_cell_bounds(cui_bridge_app *,
+                                                                   cui_bridge_node, uint32_t row,
+                                                                   uint32_t column,
+                                                                   cui_bridge_rect *out_bounds);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_data_table_header_bounds(cui_bridge_app *,
+                                                                     cui_bridge_node,
+                                                                     uint32_t column,
+                                                                     cui_bridge_rect *out_bounds);
+typedef struct {
+    uint32_t hour, minute, second;
+} cui_bridge_time;
+typedef struct {
+    int32_t year, month, day;
+} cui_bridge_date;
+/* Additive localized kind55 route. Owned fixed-width V1 records; no borrowed
+ * pointers. All reserved/trailing bytes are zero. Version1 requires exact sizes.
+ * Legacy unconfigured TimeField rendering/setters/events remain unchanged. */
+#define CUI_BRIDGE_TIME_FIELD_VERSION_V1 UINT32_C(1)
+#define CUI_BRIDGE_TIME_TOKEN_BYTES_V1 16u
+#define CUI_BRIDGE_TIME_NAME_BYTES_V1 64u
+#define CUI_BRIDGE_TIME_TEXT_BYTES_V1 160u
+enum {
+    CUI_BRIDGE_TIME_FIELD_DISABLED_V1 = 1u,
+    CUI_BRIDGE_TIME_FIELD_READONLY_V1 = 2u,
+    CUI_BRIDGE_TIME_FIELD_OWNER_INVALID_V1 = 4u
+};
+enum { CUI_BRIDGE_TIME_H23_V1 = 0, CUI_BRIDGE_TIME_H12_V1 = 1 };
+enum { CUI_BRIDGE_TIME_MINUTE_V1 = 0, CUI_BRIDGE_TIME_SECOND_V1 = 1 };
+enum { CUI_BRIDGE_TIME_HAS_MINIMUM_V1 = 1u, CUI_BRIDGE_TIME_HAS_MAXIMUM_V1 = 2u };
+enum {
+    CUI_BRIDGE_TIME_OK_V1 = 0,
+    CUI_BRIDGE_TIME_INVALID_ARGUMENT_V1 = 1,
+    CUI_BRIDGE_TIME_INVALID_CONFIG_V1 = 2,
+    CUI_BRIDGE_TIME_INVALID_SYNTAX_V1 = 3,
+    CUI_BRIDGE_TIME_INVALID_VALUE_V1 = 4,
+    CUI_BRIDGE_TIME_OUT_OF_RANGE_V1 = 5,
+    CUI_BRIDGE_TIME_BUFFER_TOO_SMALL_V1 = 6
+};
+typedef struct {
+    uint32_t length;
+    uint8_t bytes[CUI_BRIDGE_TIME_TOKEN_BYTES_V1];
+} cui_bridge_time_token_v1;
+typedef struct {
+    uint32_t length;
+    uint8_t bytes[CUI_BRIDGE_TIME_NAME_BYTES_V1];
+} cui_bridge_time_name_v1;
+typedef struct {
+    uint32_t struct_size, version, flags, cycle, precision, bounds_flags, reserved[2];
+    cui_bridge_time minimum, maximum;
+    uint64_t edit_generation;
+    /* digits0..9, separator, period_separator, am, pm; explicit even if inactive. */
+    cui_bridge_time_token_v1 tokens[14];
+    /* Hour, Minute, Second, Period; empty selects the C default name. */
+    cui_bridge_time_name_v1 names[4];
+} cui_bridge_time_field_config_v1;
+typedef struct {
+    uint32_t struct_size, version, reserved[2];
+    cui_bridge_node node;
+    uint64_t frame_sequence;
+    uint32_t status, validation, changed, rejected_count;
+    cui_bridge_time previous, value;
+    uint32_t queued_change_count, frame_status;
+} cui_bridge_time_field_result_v1;
+typedef struct {
+    uint32_t struct_size, version, frame_status, reserved;
+    cui_bridge_node node;
+    uint64_t frame_sequence;
+    cui_bridge_time previous, value;
+    uint32_t validation, rejected_count;
+} cui_bridge_time_field_change_v1;
+/* Native owner OS thread stays alive through destroy; serialize all calls.
+ * Successful enable opts this app into the existing private owner check, without
+ * enabling Slider. Destroy is unchecked/void: no concurrent/wrong-thread destroy.
+ * Default/shared WASM and NO_TLS builds are unsupported. Explicit unshared WASM
+ * reuses CUI_BRIDGE_SLIDER_WASM_UNSHARED and requires final-module verification.
+ * Capacity1..4096 (0=>4096), immutable after enable. All configured live nodes
+ * reserve one possible observation before time/poll/begin/input changes; drain
+ * the independent FIFO to make room. No change is a controlled proposal.
+ * Tokens are strict UTF8/no NUL/prefix-free1..16 bytes; names0..64. No locale
+ * lookup/case folding. Same-day inclusive bounds; minute seconds must be zero.
+ * Output records must be initialized with exact struct_size/version; other
+ * input output-record fields are ignored. Failure leaves output unchanged.
+ * Poll copies/consumes only on OK. Removal prunes unread records. Applied changes
+ * survive later frame failure with actual frame_status, not proof of painting.
+ * Result getters reject failed/omitted/unready frames; clear-error is no recovery.
+ * No foreign callback inside step; drain after step/render, including errors.
+ * Old set_time keeps its range checks on configured nodes; owner domain errors
+ * render invalid, never clamp. Clear-validation changes only transient validation.
+ * Config/strings copy synchronously. No public draft/state borrowing is exposed. */
+CUI_BRIDGE_API uint32_t cui_bridge_time_field_versions(void);
+CUI_BRIDGE_API uint32_t cui_bridge_time_field_config_size_v1(void);
+CUI_BRIDGE_API uint32_t cui_bridge_time_field_result_size_v1(void);
+CUI_BRIDGE_API uint32_t cui_bridge_time_field_change_size_v1(void);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_time_field_enable_v1(cui_bridge_app *, uint32_t);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_time_field_configure_v1(
+    cui_bridge_app *, cui_bridge_node, const cui_bridge_time_field_config_v1 *);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_time_field_get_config_v1(
+    cui_bridge_app *, cui_bridge_node, cui_bridge_time_field_config_v1 *);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_time_field_get_result_v1(
+    cui_bridge_app *, cui_bridge_node, cui_bridge_time_field_result_v1 *);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_time_field_clear_validation_v1(cui_bridge_app *,
+                                                                           cui_bridge_node);
+CUI_BRIDGE_API cui_bridge_status
+cui_bridge_time_field_poll_change_v1(cui_bridge_app *, cui_bridge_time_field_change_v1 *);
+
+typedef enum {
+    CUI_BRIDGE_BUTTON_PRIMARY = 0,
+    CUI_BRIDGE_BUTTON_SECONDARY,
+    CUI_BRIDGE_BUTTON_OUTLINE,
+    CUI_BRIDGE_BUTTON_GHOST
+} cui_bridge_button_variant;
+typedef enum {
+    CUI_BRIDGE_SIZE_INHERIT = 0,
+    CUI_BRIDGE_SIZE_XS,
+    CUI_BRIDGE_SIZE_SM,
+    CUI_BRIDGE_SIZE_BASE,
+    CUI_BRIDGE_SIZE_MD,
+    CUI_BRIDGE_SIZE_LG,
+    CUI_BRIDGE_SIZE_XL,
+    CUI_BRIDGE_SIZE_2XL,
+    CUI_BRIDGE_SIZE_3XL,
+    CUI_BRIDGE_SIZE_4XL,
+    CUI_BRIDGE_SIZE_5XL,
+    CUI_BRIDGE_SIZE_6XL,
+    CUI_BRIDGE_SIZE_7XL,
+    CUI_BRIDGE_SIZE_8XL,
+    CUI_BRIDGE_SIZE_9XL
+} cui_bridge_button_size;
+/* Shared scale. Existing Button size functions retain their Button-only
+ * contract and enum values. */
+typedef cui_bridge_button_size cui_bridge_design_size;
+typedef enum {
+    CUI_BRIDGE_ROUND_THEME = 0,
+    CUI_BRIDGE_ROUND_NONE,
+    CUI_BRIDGE_ROUND_SMALL,
+    CUI_BRIDGE_ROUND_LARGE,
+    CUI_BRIDGE_ROUND_CUSTOM
+} cui_bridge_button_rounding;
+typedef enum {
+    CUI_BRIDGE_ATTACHMENT_PENDING = 0,
+    CUI_BRIDGE_ATTACHMENT_UPLOADING,
+    CUI_BRIDGE_ATTACHMENT_PROCESSING,
+    CUI_BRIDGE_ATTACHMENT_FAILED,
+    CUI_BRIDGE_ATTACHMENT_COMPLETE
+} cui_bridge_attachment_status;
+typedef enum {
+    CUI_BRIDGE_POINTER_MOVE = 0,
+    CUI_BRIDGE_POINTER_DOWN,
+    CUI_BRIDGE_POINTER_UP
+} cui_bridge_pointer_phase;
+typedef enum { CUI_BRIDGE_KEY_DOWN = 0, CUI_BRIDGE_KEY_UP = 1 } cui_bridge_key_phase;
+typedef enum {
+    CUI_BRIDGE_KEY_TAB = 1,
+    CUI_BRIDGE_KEY_ENTER,
+    CUI_BRIDGE_KEY_SPACE,
+    CUI_BRIDGE_KEY_ESCAPE,
+    CUI_BRIDGE_KEY_LEFT,
+    CUI_BRIDGE_KEY_RIGHT,
+    CUI_BRIDGE_KEY_UP_ARROW,
+    CUI_BRIDGE_KEY_DOWN_ARROW
+} cui_bridge_key;
+enum {
+    CUI_BRIDGE_MOD_SHIFT = 1u,
+    CUI_BRIDGE_MOD_CTRL = 2u,
+    CUI_BRIDGE_MOD_ALT = 4u,
+    CUI_BRIDGE_MOD_META = 8u
+};
+typedef enum {
+    CUI_BRIDGE_EVENT_CLICK = 1,
+    CUI_BRIDGE_EVENT_CHANGE = 2,
+    CUI_BRIDGE_EVENT_CLOSE = 3
+} cui_bridge_event_type;
+typedef enum {
+    CUI_BRIDGE_SURFACE_ACCEPTED = 1,
+    CUI_BRIDGE_SURFACE_CANCELLED = 2,
+    CUI_BRIDGE_SURFACE_CLOSED = 3
+} cui_bridge_surface_result;
+typedef struct {
+    cui_bridge_event_type type;
+    cui_bridge_node node;
+    uint64_t frame_sequence;
+} cui_bridge_event;
+typedef struct {
+    cui_bridge_event_type type;
+    cui_bridge_node node;
+    uint64_t frame_sequence;
+    uint32_t checked;
+    double value;
+    uint32_t text_length;     /* Bytes excluding NUL. */
+    cui_bridge_node selected; /* Full selected Item snapshot; zero when inapplicable. */
+} cui_bridge_event_ex;
+/* Additive queued NOTIFICATION schema; existing ABI/version and event structs
+ * are unchanged. Tags/flags are fixed-width fields, not ABI-sized enums. */
+#define CUI_BRIDGE_NOTIFICATION_V1 1u
+#define CUI_BRIDGE_NOTIFY_ACTIVATE 1u
+#define CUI_BRIDGE_NOTIFY_CHANGE 2u
+#define CUI_BRIDGE_NOTIFY_LIFECYCLE 3u
+#define CUI_BRIDGE_PAYLOAD_NONE 0u
+#define CUI_BRIDGE_PAYLOAD_BOOLEAN 1u
+#define CUI_BRIDGE_PAYLOAD_SCALAR 2u    /* opt-in only; old V1 poll returns LEGACY */
+#define CUI_BRIDGE_PAYLOAD_TEXT 3u      /* opt-in plain-text snapshot */
+#define CUI_BRIDGE_PAYLOAD_SELECTION 4u /* opt-in selected handle */
+#define CUI_BRIDGE_PAYLOAD_TABLE 5u
+#define CUI_BRIDGE_PAYLOAD_SURFACE 6u
+#define CUI_BRIDGE_PAYLOAD_LEGACY 7u
+#define CUI_BRIDGE_NOTIFY_HAS_FRAME 1u
+#define CUI_BRIDGE_TABLE_SELECTION 1u
+#define CUI_BRIDGE_TABLE_SORT 2u
+typedef struct {
+    uint32_t reason, row, column, sort_column, sort_direction;
+} cui_bridge_table_notification_v1;
+typedef union {
+    uint32_t boolean_value;   /* exactly0 or1 */
+    double scalar_value;      /* opt-in scalar notification view */
+    cui_bridge_node selected; /* opt-in full slot/generation snapshot */
+    cui_bridge_table_notification_v1 table;
+    uint32_t surface_result;
+} cui_bridge_notification_value_v1;
+typedef struct {
+    uint32_t struct_size, schema_version;
+    uint32_t kind, payload_kind, flags, node_kind;
+    cui_bridge_node node;
+    uint64_t frame_sequence;
+    uint32_t text_length; /* excluding NUL; text copied separately */
+    cui_bridge_notification_value_v1 payload;
+    cui_bridge_event_ex legacy; /* complete old scalar/handle snapshot */
+} cui_bridge_notification_v1;
+CUI_BRIDGE_API uint32_t cui_bridge_notification_v1_size(void);
+/* Bit0 advertises V1. Optional symbol lookup supports older libraries. */
+CUI_BRIDGE_API uint32_t cui_bridge_notification_versions(void);
+/* Drains the SAME queue as old polling, never broadcasts or dispatches callbacks.
+ * Exact struct_size required. CAPACITY changes only required_capacity; a live
+ * event stays queued, but preceding stale origins may already have been freed.
+ * Other failures/EMPTY preserve all outputs. Success copies complete text plus
+ * NUL, then consumes once. Payloads are notifications of existing behavior, never
+ * requests. No source/index/evidence is invented; flags mark frame presence only.
+ * Initial typed allowlist: CLICK, Checkbox/Switch/Toggle, DataTable, CLOSE.
+ * Every other producer is LEGACY. No allocation, truncation or JSON parsing on
+ * poll; caller provides readable/writable declared storage extents. */
+CUI_BRIDGE_API cui_bridge_status cui_bridge_poll_notification_v1(cui_bridge_app *,
+                                                                 uint32_t struct_size,
+                                                                 cui_bridge_notification_v1 *out,
+                                                                 char *text, uint32_t capacity,
+                                                                 uint32_t *required_capacity);
+/* Opt-in categories for the SAME queue and unchanged V1 layout. Old V1 polling
+ * downgrades newly captured categories to complete LEGACY snapshots. */
+#define CUI_BRIDGE_VALUE_SCALAR_V1 (1u << CUI_BRIDGE_PAYLOAD_SCALAR)
+#define CUI_BRIDGE_VALUE_TEXT_V1 (1u << CUI_BRIDGE_PAYLOAD_TEXT)
+#define CUI_BRIDGE_VALUE_SELECTION_V1 (1u << CUI_BRIDGE_PAYLOAD_SELECTION)
+/* SCALAR: Slider/NumberInput/Rating/Pagination.
+ * TEXT: plain Input/Textarea/Editor/InputGroup only, copied separately.
+ * SELECTION: RadioGroup/Tabs/Select/List/Stepper only. */
+CUI_BRIDGE_API uint32_t cui_bridge_notification_value_payloads_v1(void);
+/* Unsupported mask bits/invalid size fail before queue cleanup or consumption.
+ * Unrequested categories return LEGACY; all existing typed tags stay unchanged.
+ * Capacity/lifetime/output rules match cui_bridge_poll_notification_v1. */
+CUI_BRIDGE_API cui_bridge_status cui_bridge_poll_value_notification_v1(
+    cui_bridge_app *, uint32_t struct_size, uint32_t enabled_payloads,
+    cui_bridge_notification_v1 *out, char *text, uint32_t capacity, uint32_t *required_capacity);
+
+typedef struct {
+    uint32_t struct_size; /* Must equal cui_bridge_options_size(). */
+    uint32_t abi_version;
+    cui_bridge_backend backend;
+    uint32_t max_nodes, max_events;
+    float width, height;        /* Logical pixels; positive, finite, <= 32768. */
+    const char *title_utf8;     /* Copied during create; optional for headless. */
+    const char *font_path_utf8; /* Required for SDL; borrowed only during create. */
+} cui_bridge_options;
+
+/* All calls for an app must be confined to one thread. Serialize all calls
+ * across all apps: the core currently uses a process-global Clay context.
+ * Strings are UTF-8,
+ * NUL-terminated, and limited to 4096 bytes excluding NUL. */
+CUI_BRIDGE_API uint32_t cui_bridge_abi_version(void);
+CUI_BRIDGE_API uint32_t cui_bridge_options_size(void);
+CUI_BRIDGE_API const char *cui_bridge_status_message(cui_bridge_status status);
+CUI_BRIDGE_API cui_bridge_app *cui_bridge_create(const cui_bridge_options *options,
+                                                 cui_bridge_status *out_status);
+/* Independent v1 record: exact size/version, initially_hidden must be 0 or 1.
+ * NULL window options mean visible defaults. Headless hidden requests return
+ * BACKEND_UNAVAILABLE. Existing options layout and create ABI are unchanged. */
+typedef struct {
+    uint32_t struct_size, version, initially_hidden;
+} cui_bridge_window_options;
+CUI_BRIDGE_API uint32_t cui_bridge_window_options_size(void);
+CUI_BRIDGE_API cui_bridge_app *
+cui_bridge_create_with_window_options(const cui_bridge_options *, const cui_bridge_window_options *,
+                                      cui_bridge_status *);
+/* Owning native UI thread only, outside active Core stepping. After-frame run
+ * callbacks are allowed. Headless returns BACKEND_UNAVAILABLE; closed returns
+ * CLOSED. Flags must be 0/1; query output is unchanged on every error. Query
+ * reports SDL's hidden flag, not occlusion/minimization or synchronous OS mapping. */
+CUI_BRIDGE_API cui_bridge_status cui_bridge_set_window_visible(cui_bridge_app *, uint32_t);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_get_window_visible(cui_bridge_app *, uint32_t *);
+CUI_BRIDGE_API void cui_bridge_destroy(cui_bridge_app *app);
+/* Zero parent creates the single root. Keys are copied, unique among live nodes;
+ * stale handles never alias a replacement node within an app. Handle provenance
+ * is app-scoped: callers must use each handle only with its creating app.
+ * Mutations are rejected during step. Trees are limited to 128 levels including
+ * the root; deeper creation returns CAPACITY without changing the tree. */
+CUI_BRIDGE_API cui_bridge_status cui_bridge_node_create(cui_bridge_app *app, cui_bridge_node parent,
+                                                        cui_bridge_kind kind, const char *key_utf8,
+                                                        cui_bridge_node *out_node);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_node_remove(cui_bridge_app *app, cui_bridge_node node);
+/* Lifecycle/handle validation precedes kind then record validation. Unsupported
+ * kinds and invalid records return INVALID_ARGUMENT without replacing old state.
+ * Empty/NONE suppress both kinds each frame; reset restores component defaults.
+ * Same mutation/callback/thread rules as other setters. Exactly 224 owned bytes
+ * per node; input copied before return. No input/layout/semantic changes. */
+CUI_BRIDGE_API uint32_t cui_bridge_box_shadows_v1_size(void);
+/* Returns1 for the six supported root kinds, otherwise0; no app needed. */
+CUI_BRIDGE_API uint32_t cui_bridge_box_shadows_supported_v1(uint32_t kind);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_set_box_shadows_v1(cui_bridge_app *, cui_bridge_node,
+                                                               uint32_t struct_size,
+                                                               const cui_bridge_box_shadows_v1 *);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_reset_box_shadows(cui_bridge_app *, cui_bridge_node);
+/* Pure factories; invalid arguments leave output unchanged. CSS radius[0,512]
+ * converts to sigma=radius/2; offsets/spread[-4096,4096], sigma[0,256]. */
+CUI_BRIDGE_API cui_bridge_status cui_bridge_box_shadow_from_css_v1(float x, float y,
+                                                                   float blur_radius, float spread,
+                                                                   uint32_t rgba, uint32_t kind,
+                                                                   uint32_t layer_size,
+                                                                   cui_bridge_box_shadow_v1 *out);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_shadow_preset_v1(uint32_t preset, float top_left,
+                                                             float top_right, float bottom_left,
+                                                             float bottom_right,
+                                                             uint32_t struct_size,
+                                                             cui_bridge_box_shadows_v1 *out);
+/* Handle/lifecycle, descriptor, capability, then style validation; invalid set
+ * preserves all old values. Nonroot storage is allocated on first set (even []),
+ * freed on last reset/removal; OUT_OF_MEMORY is atomic. No new options ABI.
+ * Group named route names every peer when any ITEM indicator is authored, with
+ * extra ID registration/capacity cost. Last indicator reset restores anonymity.
+ * ROOT and parts are independent; aliases share one slot. [] clears, reset unsets.
+ * Omitted/nonpainting owners retain values without lookup. Missing mandatory
+ * targets in actual paint remain frame errors; frame failure does not undo input.
+ * Slider has TRACK only, no THUMB. See docs/BRIDGE_SHADOWS.md for exact scope. */
+CUI_BRIDGE_API uint32_t cui_bridge_shadow_target_v1_size(void);
+CUI_BRIDGE_API uint32_t cui_bridge_shadow_target_info_v1_size(void);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_shadow_target_query_v1(
+    cui_bridge_app *, cui_bridge_node, uint32_t, const cui_bridge_shadow_target_v1 *, uint32_t,
+    cui_bridge_shadow_target_info_v1 *);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_set_target_box_shadows_v1(
+    cui_bridge_app *, cui_bridge_node, uint32_t, const cui_bridge_shadow_target_v1 *, uint32_t,
+    const cui_bridge_box_shadows_v1 *);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_reset_target_box_shadows_v1(
+    cui_bridge_app *, cui_bridge_node, uint32_t, const cui_bridge_shadow_target_v1 *);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_set_text(cui_bridge_app *app, cui_bridge_node node,
+                                                     const char *text_utf8);
+/* State setters apply to matching component kinds only. Boolean values must be 0 or 1.
+ * Number ranges must be finite with minimum < maximum and positive step.
+ * Setting a range clamps the current value into it atomically. */
+CUI_BRIDGE_API cui_bridge_status cui_bridge_set_checked(cui_bridge_app *, cui_bridge_node,
+                                                        uint32_t checked);
+/* Optional Radio or RadioGroup mark and fill animation. Use 0 for immediate
+ * presentation (default) or 1 to retain motion per node. Enabling twice keeps an
+ * active transition. Disabling or removal releases its state. Selection and
+ * queued notifications keep their existing timing. */
+CUI_BRIDGE_API cui_bridge_status cui_bridge_radio_set_motion_v1(cui_bridge_app *, cui_bridge_node,
+                                                                uint32_t enabled);
+/* Optional signed keyboard order on a Radio or RadioGroup. enabled=1 stores
+ * the index (including zero); enabled=0 restores default order and ignores the
+ * index. Lower indices come first and ties follow submission order. A group
+ * contributes a single Tab stop as focus moves among its Items. Disabled
+ * targets stay ineligible. Call on the app's owner thread between steps. The
+ * new order applies after the next successful submission. Errors preserve the
+ * previous setting. No new bridge events. */
+CUI_BRIDGE_API cui_bridge_status cui_bridge_radio_set_tab_index_v1(cui_bridge_app *,
+                                                                   cui_bridge_node,
+                                                                   uint32_t enabled,
+                                                                   int32_t tab_index);
+/* Optional decorative children for a direct RadioGroup Item. Disabled by default.
+ * An enabled item accepts Row, Column, Label, plain Badge, Avatar, Kbd, Tag, Icon
+ * and Image descendants. Enabling rejects existing unsupported descendants without
+ * changing the item. Creating one under an enabled item also fails. Decorations
+ * have layout bounds and paint in an inert subtree. The radio row owns input,
+ * focus and semantics. Disabling hides the subtree and keeps its nodes. Boolean
+ * is 0/1. Call on the app's owner thread outside a bridge step. */
+CUI_BRIDGE_API cui_bridge_status cui_bridge_radio_item_set_content_v1(cui_bridge_app *,
+                                                                      cui_bridge_node item,
+                                                                      uint32_t enabled);
+/* Optional short hint on a Radio or direct RadioGroup Item. Copies up to 256
+ * UTF-8 bytes before returning. NULL or empty text clears it. Opening delay is
+ * 0–10000 ms and is ignored on clear. Follows hover and focus, dismisses on
+ * Escape, and uses the current window bounds. An Item's explicit detail text
+ * keeps precedence for its accessible description. No additional bridge
+ * event or input target. Errors preserve the previous hint. Set from the
+ * app's owner thread outside a bridge step. */
+CUI_BRIDGE_API cui_bridge_status cui_bridge_radio_set_tooltip_v1(cui_bridge_app *, cui_bridge_node,
+                                                                 const char *text_utf8,
+                                                                 uint32_t open_delay_ms);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_set_disabled(cui_bridge_app *, cui_bridge_node,
+                                                         uint32_t disabled);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_set_value(cui_bridge_app *, cui_bridge_node,
+                                                      double value);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_set_range(cui_bridge_app *, cui_bridge_node,
+                                                      double minimum, double maximum, double step);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_get_checked(cui_bridge_app *, cui_bridge_node,
+                                                        uint32_t *out_checked);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_get_value(cui_bridge_app *, cui_bridge_node,
+                                                      double *out_value);
+/* Copies editable value and NUL. On CAPACITY, required_capacity receives bytes
+ * including NUL; destination and length are unchanged. */
+CUI_BRIDGE_API cui_bridge_status cui_bridge_get_text(cui_bridge_app *, cui_bridge_node,
+                                                     char *destination, uint32_t capacity,
+                                                     uint32_t *required_capacity);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_queue_text(cui_bridge_app *, const char *text_utf8);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_set_detail_text(cui_bridge_app *, cui_bridge_node,
+                                                            const char *text_utf8);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_set_open(cui_bridge_app *, cui_bridge_node,
+                                                     uint32_t open);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_get_open(cui_bridge_app *, cui_bridge_node,
+                                                     uint32_t *out_open);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_set_anchor(cui_bridge_app *, cui_bridge_node surface,
+                                                       cui_bridge_node anchor);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_set_visual_size(cui_bridge_app *, cui_bridge_node,
+                                                            float width, float height);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_set_total(cui_bridge_app *, cui_bridge_node,
+                                                      uint32_t total);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_set_step_status(cui_bridge_app *, cui_bridge_node item,
+                                                            uint32_t status);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_set_attachment_status(
+    cui_bridge_app *, cui_bridge_node attachment, cui_bridge_attachment_status status);
+/* Opt-in Stepper visual composition. Density: 0 MD, 1 XS, 2 SM, 3 LG.
+ * Legacy is default; bridge remains selection-owned with aggregate CHANGE.
+ * Visual paint snapshots selection until the next frame. Group cap remains 64. */
+CUI_BRIDGE_API cui_bridge_status cui_bridge_set_stepper_visual(cui_bridge_app *, cui_bridge_node,
+                                                               uint32_t enabled, uint32_t vertical,
+                                                               uint32_t density);
+/* Copies a tightly packed or padded RGBA8 image (at most 16 MiB).
+ * Also accepts Item children of Stepper as optional tinted visual icons.
+ * Item icon bytes remain owned through replacement/removal; other parents reject. */
+CUI_BRIDGE_API cui_bridge_status cui_bridge_set_image_rgba(cui_bridge_app *, cui_bridge_node image,
+                                                           const uint8_t *pixels, uint32_t width,
+                                                           uint32_t height, uint32_t stride,
+                                                           uint32_t byte_count);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_set_time(cui_bridge_app *, cui_bridge_node,
+                                                     cui_bridge_time);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_get_time(cui_bridge_app *, cui_bridge_node,
+                                                     cui_bridge_time *out_time);
+/* Packed color is 0xRRGGBBAA. */
+CUI_BRIDGE_API cui_bridge_status cui_bridge_set_color_rgba(cui_bridge_app *, cui_bridge_node,
+                                                           uint32_t rgba);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_get_color_rgba(cui_bridge_app *, cui_bridge_node,
+                                                           uint32_t *out_rgba);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_color_part_bounds(cui_bridge_app *, cui_bridge_node,
+                                                              uint32_t part,
+                                                              cui_bridge_rect *out_bounds);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_set_date(cui_bridge_app *, cui_bridge_node,
+                                                     cui_bridge_date);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_get_date(cui_bridge_app *, cui_bridge_node,
+                                                     cui_bridge_date *out_date);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_calendar_day_bounds(cui_bridge_app *,
+                                                                cui_bridge_node calendar,
+                                                                cui_bridge_date day,
+                                                                cui_bridge_rect *out_bounds);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_set_scroll_extent(cui_bridge_app *, cui_bridge_node,
+                                                              float width, float height);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_set_selected(cui_bridge_app *, cui_bridge_node group,
+                                                         cui_bridge_node item);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_get_selected(cui_bridge_app *, cui_bridge_node group,
+                                                         cui_bridge_node *out_item);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_set_gap(cui_bridge_app *app, cui_bridge_node node,
+                                                    float gap);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_set_button_variant(cui_bridge_app *app,
+                                                               cui_bridge_node node,
+                                                               cui_bridge_button_variant variant);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_set_button_size(cui_bridge_app *app,
+                                                            cui_bridge_node node,
+                                                            cui_bridge_button_size size);
+/* Button, Avatar, Stepper and Pagination. INHERIT uses legacy/source density sizing;
+ * explicit variants win over Avatar visual_size. Other kinds reject. */
+CUI_BRIDGE_API cui_bridge_status cui_bridge_set_design_size(cui_bridge_app *, cui_bridge_node,
+                                                            cui_bridge_design_size);
+/* Avatar only. Flags are 0/1; custom hue is 0..11. No other palette/ring API. */
+CUI_BRIDGE_API cui_bridge_status cui_bridge_set_avatar_identity(cui_bridge_app *, cui_bridge_node,
+                                                                uint32_t enabled,
+                                                                uint32_t custom_hue, uint32_t hue);
+/* Avatar only. Copies valid UTF-8, at most 4096 bytes, transactionally. Empty
+ * name selects the default user SVG. Used only for an empty accessible name;
+ * named initials take precedence. No borrowed icon-state pointer is accepted. */
+CUI_BRIDGE_API cui_bridge_status cui_bridge_set_avatar_placeholder(cui_bridge_app *,
+                                                                   cui_bridge_node,
+                                                                   uint32_t enabled,
+                                                                   const char *name_utf8);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_set_button_rounding(cui_bridge_app *app,
+                                                                cui_bridge_node node,
+                                                                cui_bridge_button_rounding rounding,
+                                                                float custom_radius);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_set_button_disabled(cui_bridge_app *app,
+                                                                cui_bridge_node node,
+                                                                uint32_t disabled);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_set_button_hover_rgba(cui_bridge_app *app,
+                                                                  cui_bridge_node node, uint8_t r,
+                                                                  uint8_t g, uint8_t b, uint8_t a);
+/* Host events are queued before step. SDL step also polls its own native queue.
+ * Clicks are copied into a bounded queue; language callbacks run after step. */
+CUI_BRIDGE_API cui_bridge_status cui_bridge_queue_pointer(cui_bridge_app *app,
+                                                          cui_bridge_pointer_phase phase, float x,
+                                                          float y);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_queue_key(cui_bridge_app *app,
+                                                      cui_bridge_key_phase phase,
+                                                      cui_bridge_key key, uint32_t modifiers,
+                                                      uint32_t repeat);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_queue_scroll(cui_bridge_app *, float x, float y,
+                                                         float dx, float dy);
+/* SDL-only. Installs an owned, transactional fallback font chain for missing glyphs.
+ * Count 0 clears the chain. Paths are copied by the native font loader. */
+CUI_BRIDGE_API cui_bridge_status cui_bridge_set_font_fallbacks(cui_bridge_app *,
+                                                               const char *const *paths_utf8,
+                                                               uint32_t count);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_resizable_handle_bounds(cui_bridge_app *,
+                                                                    cui_bridge_node group,
+                                                                    cui_bridge_node preceding_item,
+                                                                    cui_bridge_rect *out_bounds);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_set_text_view_format(
+    cui_bridge_app *, cui_bridge_node, uint32_t format); /* 0 Markdown, 1 HTML, 2 plain */
+CUI_BRIDGE_API cui_bridge_status cui_bridge_text_view_select(cui_bridge_app *, cui_bridge_node,
+                                                             uint32_t anchor, uint32_t cursor);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_text_view_copy_selection(cui_bridge_app *,
+                                                                     cui_bridge_node,
+                                                                     char *destination,
+                                                                     uint32_t capacity,
+                                                                     uint32_t *required_capacity);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_step(cui_bridge_app *app, float dt);
+/* Main-thread native callback loop; SDL owns modal live-resize scheduling.
+ * after_frame dispatches application events after each completed step, returning
+ * OK to continue or another status to stop. Do not nest run/step from this callback
+ * (INVALID_STATE). Destroy during a callback requests close and defers release until run exits; do
+ * not reuse app afterwards. Foreign exceptions must be caught before returning through C. Window
+ * close returns CLOSED. Native resources are released on return; app remains valid for destroy.
+ * Portable builds return BACKEND_UNAVAILABLE. Existing step/manual loops remain supported, without
+ * modal-resize iteration. */
+typedef cui_bridge_status (*cui_bridge_run_callback)(void *user);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_run(cui_bridge_app *, cui_bridge_run_callback,
+                                                void *user);
+
+CUI_BRIDGE_API cui_bridge_status cui_bridge_poll_event(cui_bridge_app *app,
+                                                       cui_bridge_event *out_event);
+/* CHANGE snapshots retain their value from the triggering frame. Text is copied
+ * to destination including NUL. On CAPACITY, required_capacity is set while the
+ * event remains queued and other outputs are preserved. Clicks have empty text.
+ * The legacy poll_event consumes only CLICK events and skips CHANGE events. */
+CUI_BRIDGE_API cui_bridge_status cui_bridge_poll_event_ex(cui_bridge_app *,
+                                                          cui_bridge_event_ex *out_event,
+                                                          char *destination, uint32_t capacity,
+                                                          uint32_t *required_capacity);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_node_bounds(cui_bridge_app *app, cui_bridge_node node,
+                                                        cui_bridge_rect *out_bounds);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_dropdown_part_bounds(cui_bridge_app *, cui_bridge_node,
+                                                                 uint32_t menu_part,
+                                                                 cui_bridge_rect *out_bounds);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_numeric_part_bounds(cui_bridge_app *, cui_bridge_node,
+                                                                uint32_t part,
+                                                                cui_bridge_rect *out_bounds);
+/* Optional owned Icon resources; native-endian fixed-width records.
+ * Handles are scoped to the matching app; C callers must retain that app.
+ * Foreign wrappers must additionally retain/check owner identity. No raw state,
+ * callbacks or bitmap pointers cross this interface. Zero limits select C defaults.
+ * Serialized owner thread only, outside step/render; default/shared WASM and
+ * CUI_BRIDGE_SLIDER_NO_TLS are unsupported. Same explicit unshared opt-in as Slider.
+ * Copy CAPACITY changes only required sizes; other errors leave outputs unchanged.
+ * Input/output ranges must be valid, stable and mutually disjoint, including the
+ * app/resource graph. Output records require exact size/version initialized; other prior bytes are
+ * ignored and success writes canonical zero reserved fields. INPUT reserved
+ * words reject.
+ * Destroy rejects referenced resources. This group advertises resource utilities.
+ * Query Icon presentation separately. Arbitrary loader callbacks stay in direct C. */
+typedef struct {
+    uint32_t slot, generation;
+} cui_bridge_icon_handle_v1;
+typedef struct {
+    uint32_t struct_size, schema_version, reserved[2];
+    uint64_t max_svg_bytes, max_pixels, max_cache_bytes, max_versions;
+} cui_bridge_icon_limits_v1;
+typedef struct {
+    uint32_t struct_size, schema_version, icon_error, reference_count;
+    uint64_t parse_count, raster_count, cache_bytes, cache_versions, source_revision;
+    uint32_t source_kind, flags;
+    cui_bridge_icon_handle_v1 handle;
+    uint64_t reserved;
+} cui_bridge_icon_info_v1;
+typedef struct {
+    uint32_t struct_size, schema_version, format, reserved;
+    uint32_t width, height, stride, reserved2;
+    uint64_t required_bytes, revision;
+    float paint_x, paint_y, paint_width, paint_height;
+} cui_bridge_icon_bitmap_v1;
+enum {
+    CUI_BRIDGE_ICON_EMPTY_V1 = 0,
+    CUI_BRIDGE_ICON_NAME_V1 = 1,
+    CUI_BRIDGE_ICON_PATH_V1 = 2,
+    CUI_BRIDGE_ICON_DATA_V1 = 3
+};
+enum {
+    CUI_BRIDGE_ICON_LIMITS_RECORD_V1 = 3,
+    CUI_BRIDGE_ICON_INFO_RECORD_V1 = 4,
+    CUI_BRIDGE_ICON_BITMAP_RECORD_V1 = 5
+};
+/* bit0: complete resource/utilities group only. Record kinds3/4/5 are limits,
+ * info, bitmap. Other/future kinds return0; no Badge capability or declarations. */
+CUI_BRIDGE_API uint32_t cui_bridge_icon_versions(void);
+CUI_BRIDGE_API uint32_t cui_bridge_icon_record_size_v1(uint32_t record_kind);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_icon_default_limits_v1(cui_bridge_icon_limits_v1 *);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_icon_create_v1(cui_bridge_app *,
+                                                           const cui_bridge_icon_limits_v1 *,
+                                                           cui_bridge_icon_handle_v1 *);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_icon_destroy_v1(cui_bridge_app *,
+                                                            cui_bridge_icon_handle_v1);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_icon_get_info_v1(cui_bridge_app *,
+                                                             cui_bridge_icon_handle_v1,
+                                                             cui_bridge_icon_info_v1 *);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_icon_get_limits_v1(cui_bridge_app *,
+                                                               cui_bridge_icon_handle_v1,
+                                                               cui_bridge_icon_limits_v1 *);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_icon_set_limits_v1(cui_bridge_app *,
+                                                               cui_bridge_icon_handle_v1,
+                                                               const cui_bridge_icon_limits_v1 *);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_icon_set_source_v1(cui_bridge_app *,
+                                                               cui_bridge_icon_handle_v1,
+                                                               uint32_t kind, const char *,
+                                                               uint32_t byte_length);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_icon_get_source_v1(cui_bridge_app *,
+                                                               cui_bridge_icon_handle_v1,
+                                                               uint32_t *kind, char *,
+                                                               uint32_t capacity,
+                                                               uint32_t *required);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_icon_reload_v1(cui_bridge_app *,
+                                                           cui_bridge_icon_handle_v1);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_icon_collect_v1(cui_bridge_app *,
+                                                            cui_bridge_icon_handle_v1);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_icon_asset_put_v1(cui_bridge_app *,
+                                                              cui_bridge_icon_handle_v1,
+                                                              const char *path, uint32_t path_bytes,
+                                                              const char *svg, uint32_t svg_bytes);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_icon_asset_remove_v1(cui_bridge_app *,
+                                                                 cui_bridge_icon_handle_v1,
+                                                                 const char *path,
+                                                                 uint32_t path_bytes);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_icon_asset_clear_v1(cui_bridge_app *,
+                                                                cui_bridge_icon_handle_v1);
+CUI_BRIDGE_API uint32_t cui_bridge_icon_catalog_count_v1(void);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_icon_catalog_entry_v1(
+    uint32_t index, uint32_t *is_default, char *name, uint32_t name_capacity,
+    uint32_t *name_required, char *path, uint32_t path_capacity, uint32_t *path_required);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_icon_query_v1(const char *, uint32_t,
+                                                          uint32_t *availability);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_icon_asset_copy_v1(const char *, uint32_t, char *,
+                                                               uint32_t capacity,
+                                                               uint32_t *required);
+/* Operational prepare errors return bridge OK plus exact cui_icon_error0..5.
+ * Returned bitmap is an owned copy of packed straight RGBA8 rows, never a view. */
+CUI_BRIDGE_API cui_bridge_status cui_bridge_icon_prepare_v1(cui_bridge_app *,
+                                                            cui_bridge_icon_handle_v1, float width,
+                                                            float height, const float transform[6],
+                                                            uint32_t *icon_error);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_icon_bitmap_copy_v1(cui_bridge_app *,
+                                                                cui_bridge_icon_handle_v1,
+                                                                cui_bridge_icon_bitmap_v1 *,
+                                                                unsigned char *, uint32_t capacity,
+                                                                uint32_t *required);
+
+/* Optional configured presentation for a retained Icon. Fixed-width,
+ * native-endian records use exact size and schema_version=1. RGBA numbers
+ * are 0xRRGGBBAA. Flags express presence, including explicit zero. */
+enum {
+    CUI_BRIDGE_ICON_WIDTH_V1 = 1u << 0,
+    CUI_BRIDGE_ICON_HEIGHT_V1 = 1u << 1,
+    CUI_BRIDGE_ICON_COLOR_V1 = 1u << 2,
+    CUI_BRIDGE_ICON_INHERITED_COLOR_V1 = 1u << 3,
+    CUI_BRIDGE_ICON_OPACITY_V1 = 1u << 4,
+    CUI_BRIDGE_ICON_TRANSFORM_V1 = 1u << 5,
+    CUI_BRIDGE_ICON_DECORATIVE_V1 = 1u << 6,
+    CUI_BRIDGE_ICON_STYLE_V1 = 1u << 7,
+    CUI_BRIDGE_ICON_CONSTRAINTS_V1 = 1u << 8,
+    CUI_BRIDGE_ICON_DEBUG_PLACEHOLDER_V1 = 1u << 9
+};
+enum {
+    CUI_BRIDGE_ICON_BOX_ROW_V1 = 1u << 0,
+    CUI_BRIDGE_ICON_BOX_CLIP_V1 = 1u << 1,
+    CUI_BRIDGE_ICON_BOX_CORNERS_V1 = 1u << 2,
+    CUI_BRIDGE_ICON_BOX_BORDER_EDGES_V1 = 1u << 3,
+    CUI_BRIDGE_ICON_BOX_FIXED_WIDTH_V1 = 1u << 4,
+    CUI_BRIDGE_ICON_BOX_FIXED_HEIGHT_V1 = 1u << 5,
+    CUI_BRIDGE_ICON_BOX_LAYOUT_ONLY_V1 = 1u << 6,
+    CUI_BRIDGE_ICON_BOX_INERT_V1 = 1u << 7,
+    CUI_BRIDGE_ICON_BOX_OPACITY_V1 = 1u << 8,
+    CUI_BRIDGE_ICON_BOX_WIDTH_PERCENT_V1 = 1u << 9,
+    CUI_BRIDGE_ICON_BOX_HEIGHT_PERCENT_V1 = 1u << 10,
+    CUI_BRIDGE_ICON_BOX_PADDING_EDGES_V1 = 1u << 11
+};
+enum {
+    CUI_BRIDGE_ICON_MIN_WIDTH_V1 = 1u << 0,
+    CUI_BRIDGE_ICON_MIN_HEIGHT_V1 = 1u << 1,
+    CUI_BRIDGE_ICON_MAX_WIDTH_V1 = 1u << 2,
+    CUI_BRIDGE_ICON_MAX_HEIGHT_V1 = 1u << 3
+};
+typedef struct {
+    uint32_t struct_size, schema_version, flags, reserved;
+    float width, height, padding, gap, radius;
+    uint32_t background_rgba, border_rgba;
+    float border_width;
+    uint32_t align_x, align_y; /* START=0, CENTER=1, END=2 */
+    float offset_x, offset_y;
+    float corners[4], border_edges[4];                      /* TL,TR,BL,BR and L,R,T,B */
+    float max_width, max_height, opacity, padding_edges[4]; /* L,R,T,B */
+    uint32_t reserved_tail;
+} cui_bridge_icon_style_v1;
+typedef struct {
+    uint32_t struct_size, schema_version, flags, reserved;
+    float min_width, min_height, max_width, max_height;
+} cui_bridge_icon_constraints_v1;
+typedef struct {
+    uint32_t struct_size, schema_version, flags, size, design_size, reserved[3];
+    float custom_size, inherited_text_size, width, height, opacity, rem_size;
+    uint32_t color_rgba, inherited_color_rgba;
+    float transform[6]; /* a,b,c,d,tx,ty */
+    cui_bridge_icon_style_v1 style;
+    cui_bridge_icon_constraints_v1 constraints;
+    uint32_t reserved_tail[2];
+} cui_bridge_icon_options_v1;
+typedef struct {
+    uint32_t struct_size, schema_version, icon_error, frame_status;
+    cui_bridge_node node;
+    uint64_t frame_sequence, reserved;
+} cui_bridge_icon_result_v1;
+enum {
+    CUI_BRIDGE_ICON_STYLE_RECORD_V1 = 0,
+    CUI_BRIDGE_ICON_CONSTRAINTS_RECORD_V1 = 1,
+    CUI_BRIDGE_ICON_OPTIONS_RECORD_V1 = 2,
+    CUI_BRIDGE_ICON_RESULT_RECORD_V1 = 3
+};
+/* bit0: all V1 presentation operations. Independent of resource size indices. */
+CUI_BRIDGE_API uint32_t cui_bridge_icon_presentation_versions(void);
+CUI_BRIDGE_API uint32_t cui_bridge_icon_presentation_record_size_v1(uint32_t kind);
+/* Size is INHERITED=0 through CUSTOM=5. Design size follows CUI_DESIGN_*.
+ * Copy options and strict UTF-8 name (<=4096 bytes, no NUL in the span).
+ * Absent nested records are all zero. Present records have their own headers.
+ * See the Icon component for layout/paint precedence and ignored box fields.
+ * Resource references survive frames. Legacy text/visual-size setters reject
+ * until reset. All entry points require serialized use on the app owner thread. */
+CUI_BRIDGE_API cui_bridge_status cui_bridge_icon_configure_node_v1(
+    cui_bridge_app *, cui_bridge_node, cui_bridge_icon_handle_v1,
+    const cui_bridge_icon_options_v1 *, const char *name, uint32_t name_bytes);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_icon_get_node_config_v1(cui_bridge_app *,
+                                                                    cui_bridge_node,
+                                                                    cui_bridge_icon_handle_v1 *,
+                                                                    cui_bridge_icon_options_v1 *);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_icon_copy_node_name_v1(cui_bridge_app *,
+                                                                   cui_bridge_node, char *,
+                                                                   uint32_t capacity,
+                                                                   uint32_t *required);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_icon_reset_node_v1(cui_bridge_app *, cui_bridge_node);
+/* EMPTY until invoked in the latest admitted step. The copied Icon error and
+ * whole-frame status are independent. Reads never prepare or paint. */
+CUI_BRIDGE_API cui_bridge_status cui_bridge_icon_get_node_result_v1(cui_bridge_app *,
+                                                                    cui_bridge_node,
+                                                                    cui_bridge_icon_result_v1 *);
+
+/* Optional zero-flow Badge indicator around ordinary retained children.
+ * Size follows C control sizes: medium=0, small=1, large=2, xsmall=3.
+ * Design size follows CUI_DESIGN_*. V1 records are exact-size, native-endian.
+ * RGBA numbers are 0xRRGGBBAA; custom color includes transparent black.
+ * Count and maximum must fit the target's size_t. Count=0 omits the indicator.
+ * ICON accepts an owned resource with Icon options, or a nonempty catalog name.
+ * COUNT and DOT use neither. The optional copied name labels the indicator. */
+enum {
+    CUI_BRIDGE_BADGE_COUNT_V1 = 0,
+    CUI_BRIDGE_BADGE_DOT_V1 = 1,
+    CUI_BRIDGE_BADGE_ICON_V1 = 2,
+    CUI_BRIDGE_BADGE_CUSTOM_COLOR_V1 = 1u << 0,
+    CUI_BRIDGE_BADGE_ICON_OBSERVED_V1 = 1u << 0
+};
+typedef struct {
+    uint32_t struct_size, schema_version, reserved[2];
+    uint32_t variant, size, design_size, flags;
+    uint64_t count, maximum;
+    uint32_t color_rgba, reserved_tail;
+    cui_bridge_icon_handle_v1 artwork;
+} cui_bridge_badge_config_v1;
+typedef struct {
+    uint32_t struct_size, schema_version, submitted, icon_error;
+    cui_bridge_node node;
+    uint64_t frame_sequence;
+    uint32_t frame_status, flags;
+} cui_bridge_badge_result_v1;
+enum {
+    CUI_BRIDGE_BADGE_CONFIG_RECORD_V1 = 0,
+    CUI_BRIDGE_BADGE_RESULT_RECORD_V1 = 1,
+    CUI_BRIDGE_BADGE_NAME_V1 = 0,
+    CUI_BRIDGE_BADGE_NAMED_ICON_V1 = 1
+};
+/* bit0: complete configured Badge V1 group. */
+CUI_BRIDGE_API uint32_t cui_bridge_badge_versions(void);
+CUI_BRIDGE_API uint32_t cui_bridge_badge_record_size_v1(uint32_t kind);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_badge_default_config_v1(cui_bridge_badge_config_v1 *);
+/* Create or replace atomically. Strings copy strict UTF-8, at most 4096 bytes
+ * each, excluding NUL. Supply artwork options only with a nonzero handle.
+ * Use the matching app on its owner thread, outside steps. */
+CUI_BRIDGE_API cui_bridge_status cui_bridge_badge_create_v1(
+    cui_bridge_app *, cui_bridge_node parent, const char *key, const cui_bridge_badge_config_v1 *,
+    const cui_bridge_icon_options_v1 *, const char *name, uint32_t name_bytes,
+    const char *named_icon, uint32_t icon_bytes, cui_bridge_node *);
+CUI_BRIDGE_API cui_bridge_status
+cui_bridge_badge_configure_v1(cui_bridge_app *, cui_bridge_node, const cui_bridge_badge_config_v1 *,
+                              const cui_bridge_icon_options_v1 *, const char *name,
+                              uint32_t name_bytes, const char *named_icon, uint32_t icon_bytes);
+/* Both output records need their exact headers. When no owned artwork is
+ * configured, the output Icon options contain only their header. */
+CUI_BRIDGE_API cui_bridge_status cui_bridge_badge_get_config_v1(cui_bridge_app *, cui_bridge_node,
+                                                                cui_bridge_badge_config_v1 *,
+                                                                cui_bridge_icon_options_v1 *);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_badge_copy_text_v1(cui_bridge_app *, cui_bridge_node,
+                                                               uint32_t field, char *,
+                                                               uint32_t capacity,
+                                                               uint32_t *required);
+/* Result is EMPTY until invoked in the latest admitted step. Inspect the flag
+ * before interpreting icon_error. Frame status and submission are separate. */
+CUI_BRIDGE_API cui_bridge_status cui_bridge_badge_get_result_v1(cui_bridge_app *, cui_bridge_node,
+                                                                cui_bridge_badge_result_v1 *);
+CUI_BRIDGE_API cui_bridge_status cui_bridge_badge_indicator_bounds_v1(cui_bridge_app *,
+                                                                      cui_bridge_node,
+                                                                      cui_bridge_rect *);
+
+CUI_BRIDGE_API cui_bridge_status cui_bridge_request_close(cui_bridge_app *app);
+
+#ifdef __cplusplus
+}
+#endif
+#endif

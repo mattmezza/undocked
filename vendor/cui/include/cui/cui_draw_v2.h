@@ -1,0 +1,103 @@
+/* SPDX-License-Identifier: MIT */
+#ifndef CUI_DRAW_V2_H
+#define CUI_DRAW_V2_H
+#include "cui_background.h"
+#ifdef __cplusplus
+extern "C" {
+#endif
+/* Unreleased V2 transport. The C software adapter supports this list through
+ * cui_software_query_v2/render_v2; other adapters and foreign bindings remain pending.
+ * V1 structs, enums, config and renderer routes are unchanged.
+ * Query the actual V2 consumer BEFORE composition; fabricated capability
+ * values are a caller contract, not evidence of renderer support. */
+#define CUI_DRAW_ABI_V2 2u
+#define CUI_DRAW_V2_BACKGROUND 9u
+#define CUI_DRAW_V2_FEATURE_BACKGROUNDS UINT64_C(1)
+#define CUI_BACKGROUND_OUTPUT_SRGBA8_CENTER_V1 1u
+#define CUI_DRAW_V2_DEFAULT_COMMAND_BYTES ((size_t)16 * 1024 * 1024)
+#define CUI_DRAW_V2_DEFAULT_BACKGROUND_BYTES ((size_t)512 * 1024)
+#define CUI_DRAW_V2_MAX_BYTES ((size_t)16 * 1024 * 1024)
+typedef struct {
+    cui_rect bounds;
+    cui_corner_radii radii;
+    cui_background brush; /* Owned; legacy resources below retain V1 borrowing. */
+    float opacity;        /* Ancestor product, applied ONCE by preparer. */
+} cui_background_draw_v2;
+typedef struct {
+    uint32_t kind; /* 0..8 equal V1 tags; payload.legacy.type must equal kind. */
+    union {
+        cui_draw_command legacy;
+        cui_background_draw_v2 background;
+    } payload;
+} cui_draw_command_v2;
+typedef struct {
+    uint32_t header_size, abi_version;
+    size_t command_stride;
+    const cui_draw_command_v2 *commands;
+    size_t count;
+    float width, height;
+    uint64_t required_features;
+    uint32_t background_output;
+    cui_error error; /* Non-OK lists MUST NOT render or clear. */
+} cui_draw_list_v2;
+typedef struct {
+    uint32_t size, abi_version, background_output;
+    uint64_t features;
+    size_t max_commands, max_backgrounds;
+    size_t max_pixels, max_pixels_per_background;
+    size_t cpu_bytes, texture_bytes, transfer_bytes, metadata_bytes;
+} cui_draw_v2_support;
+typedef struct {
+    uint32_t size;
+    cui_draw_v2_support support;
+    uint64_t required_features;
+    size_t command_bytes, background_bytes; /* Zero selects defaults above. */
+} cui_frame_v2_options;
+/* Unreleased shared preparation options, not an adapter support query. Exact size
+ * and CENTER_V1 tag required. Scales [1/65536,64], origins [-1e6,1e6], viewport
+ * sides <=16384 (zero yields empty work). Explicit nonzero resource ceilings:
+ * <=8M pixels/frame, <=4M/background; <=32MiB each CPU/texture/transfer and
+ * <=1MiB metadata. CPU covers adapter-owned transaction payload and counted CUI
+ * text temporaries, NOT existing font state or opaque new FT/HB/Bidi/provider
+ * allocations. No total-process/joint dependency-memory guarantee. Native text
+ * additionally admits <=64KiB/paragraph,256KiB aggregate input,64 faces,
+ * 8192 shaping attempts,4096 segments,65536 glyphs,8M copied coverage pixels;
+ * each glyph <=4096/side and4M pixels. Limits may reject V2 without publication.
+ * Opaque operations can allocate before output/work rejection. See software
+ * font-session contract. Actual adapters preflight aggregate/inflight usage. */
+typedef struct {
+    uint32_t size, background_output;
+    unsigned viewport_width, viewport_height;
+    float scale_x, scale_y, origin_x, origin_y;
+    size_t cpu_bytes, texture_bytes, transfer_bytes, metadata_bytes;
+    size_t max_pixels, max_pixels_per_background;
+} cui_render_v2_options;
+/* Optional retained storage reserved BEFORE opening/consuming input. Exact size,
+ * ABI and output policy required; unknown bits fail INVALID_ACTION; insufficient
+ * budgets CAPACITY. Command cap=min(config.max_commands,16384,support.max_commands,
+ * command_bytes/sizeof(command)); backgrounds=min(config.max_elements,4096,
+ * support.max_backgrounds), including an aligned max_elements*sizeof(uint32_t) owner map in one
+ * block. Additional retained and transient payload <=32MiB; no raster allocation.
+ * V1 allocates none. Growth frees expired frame blocks before replacement; failed
+ * growth leaves input queued/context usable, but expires the previous list.
+ * Array lasts until next begin attempt/destroy; borrowed V1 resources still obey V1 lifetime.
+ * Copying this array does NOT deep-copy text/image/mesh backing. */
+bool cui_begin_frame_v2(cui_context *, float w, float h, float dt, const cui_frame_v2_options *);
+/* Wrong end (including V1 end on V2) leaves the frame open, consumes no callbacks
+ * and reports LIFECYCLE. Clear diagnostics, then call matching end exactly once.
+ * Null out rejects before closing. Matching end closes even on failure, returns
+ * false and an empty ABI2 error list. Never returns an incomplete V1 list. */
+bool cui_end_frame_v2(cui_context *, cui_draw_list_v2 *out);
+/* Current open box (anonymous supported), or already submitted named box only.
+ * Require requested background feature in active V2 frame. No measurement,
+ * prepaint, diagnostic reentrancy, layout-only/suppressed/missing/colliding target.
+ * NULL clears. Transparent SOLID overrides. Copy all active fields atomically;
+ * inactive fields ignored/canonicalized; last valid call wins. Clear preserves
+ * shadows/outline/underlay/prepaint. Distinct touched owners consume slots until
+ * next admitted begin, even after clear; repeat/clear never allocate. */
+bool cui_set_background(cui_context *, const cui_background *);
+bool cui_element_set_background(cui_context *, cui_id, const cui_background *);
+#ifdef __cplusplus
+}
+#endif
+#endif
