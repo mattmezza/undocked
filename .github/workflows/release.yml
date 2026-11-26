@@ -1,0 +1,71 @@
+name: Release Undocked
+
+on:
+  push:
+    tags: ['v[0-9]*']
+
+permissions: {}
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+    strategy:
+      matrix:
+        include:
+          - {arch: x86_64, runner: ubuntu-24.04}
+          - {arch: aarch64, runner: ubuntu-24.04-arm}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Build and verify static executable
+        run: |
+          [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          mkdir dist
+          docker run --rm -v "$PWD:/src:ro" -v "$PWD/dist:/out" \
+            alpine:3.23 sh /src/tools/build-release.sh "$GITHUB_REF_NAME" /out
+      - name: Test executable on an isolated X11 server
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb xauth xdotool x11-utils
+          xvfb-run -a -s '-screen 0 1440x900x24' python3 tests/x11.py "dist/undocked-linux-$ARCH"
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: undocked-linux-${{ matrix.arch }}
+          path: dist/undocked-linux-${{ matrix.arch }}*
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          pattern: undocked-linux-*
+          path: dist
+          merge-multiple: true
+      - name: Publish release and assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          cp config.ini install.sh LICENSE dist/
+          tar -czf dist/notices.tar.gz LICENSE assets/*-LICENSE assets/licenses vendor/cui/LICENSE vendor/cui/third_party/clay/LICENSE
+          cd dist
+          sha256sum -c undocked-linux-x86_64.sha256 undocked-linux-aarch64.sha256
+          sha256sum config.ini > config.ini.sha256
+          gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes \
+            --title "Undocked $GITHUB_REF_NAME" undocked-linux-* config.ini config.ini.sha256 install.sh notices.tar.gz
