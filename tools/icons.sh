@@ -5,8 +5,8 @@ cd "$(dirname "$0")/.."
 icon_work=$(mktemp -d)
 trap 'rm -r "$icon_work"' EXIT
 origin=https://raw.githubusercontent.com/tailwindlabs/heroicons/v2.2.0/optimized/24/outline
-for icon_name in computer-desktop view-columns eye adjustments-horizontal square-2-stack \
-        folder-open plus x-mark check arrow-left chevron-up chevron-down arrow-path power; do
+for icon_name in computer-desktop view-columns eye square-2-stack plus x-mark check \
+        arrow-left chevron-up chevron-down arrow-path; do
     curl -fsSL --retry 3 "$origin/$icon_name.svg" -o "$icon_work/$icon_name.svg"
 done
 python3 - "$icon_work" <<'PY'
@@ -26,18 +26,15 @@ def outline(body):
 desktop = paths('computer-desktop')
 column = paths('view-columns')
 icons = [
-    f'<defs><mask id="overlap"><rect width="24" height="24" fill="white" stroke="none"/>'
-    f'<rect x="1" y="7" width="15" height="15" rx="2" fill="black" stroke="black"/></mask></defs>'
-    f'<g mask="url(#overlap)"><g transform="translate(6 -1) scale(.8)">{desktop}</g></g>'
-    f'<g transform="translate(-1 6) scale(.8)">{desktop}</g>',
     desktop, column, f'<g transform="rotate(90 12 12)">{column}</g>',
     # The two-above arrangement uses the same rounded outline as rectangle-group.
     '<rect x="2.5" y="3.5" width="8" height="6.5" rx="1.1"/>'
     '<rect x="13.5" y="3.5" width="8" height="6.5" rx="1.1"/>'
     '<rect x="8" y="13.5" width="8" height="6.5" rx="1.1"/>',
 ]
-icons += [paths(name) for name in ('eye', 'adjustments-horizontal', 'square-2-stack',
-    'folder-open', 'plus', 'x-mark', 'check', 'arrow-left', 'chevron-up', 'chevron-down', 'arrow-path', 'power')]
+icons += [paths(name) for name in ('eye', 'square-2-stack', 'plus', 'x-mark', 'check', 'arrow-left')]
+icons.append(f'<g transform="translate(24 0) scale(-1 1)">{paths("arrow-left")}</g>')
+icons += [paths(name) for name in ('chevron-up', 'chevron-down', 'arrow-path')]
 with open('assets/icons.alpha', 'wb') as atlas:
     for icon in icons:
         png = subprocess.check_output(['rsvg-convert', '-w', '32', '-h', '32'], input=outline(icon).encode())

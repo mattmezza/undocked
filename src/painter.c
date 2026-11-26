@@ -222,13 +222,6 @@ painter_repaint(Painter *p, X11 *x, Window window, GC gc)
     XPutImage(x->display, window, gc, p->image, 0, 0, 0, 0, (unsigned)p->width, (unsigned)p->height);
 }
 
-unsigned
-icon_coverage(enum Icon icon, int x, int y, int size)
-{
-    const unsigned char *mask = undocked_icon_masks + icon * ICON_PX * ICON_PX;
-    return mask[(2 * y + 1) * ICON_PX / (2 * size) * ICON_PX + (2 * x + 1) * ICON_PX / (2 * size)];
-}
-
 bool
 paint_icon(cui_context *ui, enum Icon icon, float size, cui_color foreground)
 {

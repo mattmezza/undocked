@@ -84,8 +84,8 @@ path_value(char *path, const char *value, const char *relative)
 bool
 config_load(Config *config, char *error)
 {
-    *config = (Config){.settle = 650, .confirm = 15, .identify = 4, .width = 900,
-                       .height = 640, .snap = 14, .radius = -1, .automatic = true, .tray = true};
+    *config = (Config){.settle = 650, .confirm = 15, .identify = 4, .width = 760,
+                       .height = 500, .snap = 14, .radius = -1, .automatic = true};
     const char *home = getenv("HOME"), *xdg = getenv("XDG_CONFIG_HOME");
     char root[PATH_SIZE];
     int size;
@@ -135,7 +135,7 @@ config_load(Config *config, char *error)
             config->aliases++;
         } else if (!strcmp(section, "undocked")) {
             if (!strcmp(key, "autoapply")) valid = parse_bool(value, &config->automatic);
-            else if (!strcmp(key, "tray")) valid = parse_bool(value, &config->tray);
+            else if (!strcmp(key, "tray")) continue; /* Accept existing configuration files. */
             else if (!strcmp(key, "match_ports")) valid = parse_bool(value, &config->match_ports);
             else if (!strcmp(key, "follow_lid")) valid = parse_bool(value, &config->follow_lid);
             else if (!strcmp(key, "settle_ms")) valid = parse_int(value, &config->settle, 100, 10000);

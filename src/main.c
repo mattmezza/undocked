@@ -13,7 +13,7 @@
 static const char usage[] =
     "Usage: undocked [command]\n"
     "  (no command)                       Open the display editor\n"
-    "  daemon [--tray|--no-tray|--restart] Watch RandR changes in this X session\n"
+    "  daemon [--restart]                 Watch RandR changes in this X session\n"
     "  launch                            Pick actions and presets in Launch\n"
     "  status [--json]                    List outputs, modes and session state\n"
     "  presets [--json]                   List saved presets and match reasons\n"
@@ -430,13 +430,11 @@ main(int argc, char **argv)
     if (!strcmp(command, "--help") || !strcmp(command, "help")) { fputs(usage, stdout); return 0; }
     if (!strcmp(command, "--version")) { puts("undocked " UNDOCKED_VERSION); return 0; }
     if (!strcmp(command, "daemon")) {
-        if (argc == 2) return daemon_main(-1, true);
-        if (argc == 3 && !strcmp(argv[2], "--tray")) return daemon_main(true, true);
-        if (argc == 3 && !strcmp(argv[2], "--no-tray")) return daemon_main(false, true);
-        if (argc == 3 && !strcmp(argv[2], "--on-demand")) return daemon_main(-1, false);
+        if (argc == 2) return daemon_main(true);
+        if (argc == 3 && !strcmp(argv[2], "--on-demand")) return daemon_main(false);
         if (argc == 3 && !strcmp(argv[2], "--restart")) return daemon_restart(false);
         if (argc == 3 && !strcmp(argv[2], "--restart-if-running")) return daemon_restart(true);
-        return fail("Use undocked daemon [--tray|--no-tray|--restart].");
+        return fail("Use undocked daemon [--restart].");
     }
     if (!strcmp(command, "launch") && argc == 2) return launch_main();
     if (!strcmp(command, "output")) return set_output(argc, argv);

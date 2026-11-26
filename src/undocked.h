@@ -51,7 +51,7 @@ typedef struct {
 
 typedef struct {
     int settle, confirm, identify, width, height, snap, radius;
-    bool automatic, match_ports, follow_lid, tray;
+    bool automatic, match_ports, follow_lid;
     char hook[PATH_SIZE], font[PATH_SIZE], mono[PATH_SIZE], presets[PATH_SIZE];
     char config[PATH_SIZE];
     char port[OUTPUTS][PORT], alias[OUTPUTS][NAME];
@@ -59,7 +59,8 @@ typedef struct {
 } Config;
 
 enum Command {
-    GET = 1, TEST, APPLY, KEEP, REVERT, RECOVER, IDENTIFY, ENABLE_TRAY, RELOAD, DISABLE_TRAY
+    /* Keep request numbers stable across running daemon upgrades. */
+    GET = 1, TEST, APPLY, KEEP, REVERT, RECOVER, IDENTIFY, RELOAD = 9
 };
 enum { REQUEST_VERSION = 1, IMMEDIATE = 1, STRICT_PORTS = 2 };
 
@@ -111,7 +112,7 @@ Layout recovery_layout(const Topology *, bool lid_closed);
 bool lid_closed(void);
 
 bool rpc(const Request *, Reply *, bool start);
-int daemon_main(int tray, bool reconcile);
+int daemon_main(bool reconcile);
 int daemon_restart(bool only_running);
 int editor_main(void);
 int launch_main(void);

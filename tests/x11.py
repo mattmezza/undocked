@@ -99,7 +99,7 @@ with tempfile.TemporaryDirectory(prefix="undocked-test-") as temp:
     os.environ.update(XDG_CONFIG_HOME=str(config.parent), XDG_RUNTIME_DIR=str(runtime),
                       PATH=f"{root}:{os.environ['PATH']}")
     (config / "config.ini").write_text(
-        "[undocked]\nsettle_ms = 180\nconfirm_seconds = 5\nidentify_seconds = 1\n"
+        "[undocked]\nsettle_ms = 180\nconfirm_seconds = 5\nidentify_seconds = 1\ntray = true\n"
         f"after_change = printf '%s:%s\\n' \"$UNDOCKED_REASON\" \"$UNDOCKED_PRESET\" >> '{root / 'events'}'\n"
     )
     daemon = subprocess.Popen([app, "daemon"])
@@ -135,20 +135,38 @@ with tempfile.TemporaryDirectory(prefix="undocked-test-") as temp:
         time.sleep(0.3)
         if multi:
             original = state()["outputs"]
-            run("xdotool", "mousemove", "--window", wid, "248", "275", "mousedown", "1",
-                "sleep", "0.2", "mousemove", "--window", wid, "313", "337",
+            run("xdotool", "mousemove", "--window", wid, "147", "233", "mousedown", "1",
+                "sleep", "0.2", "mousemove", "--window", wid, "195", "277",
                 "sleep", "0.2", "mouseup", "1")
             time.sleep(0.2)
-            click(wid, 837, 615)
+            click(wid, 697, 464)
             wait_for(lambda: state()["confirmation_seconds"] > 0)
             assert state()["outputs"] != original
-            click(wid, 740, 615)
+            click(wid, 611, 464)
             wait_for(lambda: state()["outputs"] == original)
-        click(wid, 738, 615)
+            click(wid, 147, 233)
+            click(wid, 615, 184)
+            active = original[0]["mode"]
+            modes = original[0]["modes"]
+            run("xdotool", "click", "--repeat", str(len(modes)), "--delay", "5", "4")
+            first_mode_is_active = all(modes[0][key] == value for key, value in active.items())
+            click(wid, 210, 106 + 33 * first_mode_is_active)
+            click(wid, 445, 464)
+            wait_for(lambda: state()["confirmation_seconds"] > 0)
+            assert state()["outputs"][0]["mode"] != active
+            click(wid, 350, 464)
+            wait_for(lambda: state()["outputs"] == original)
+            click(wid, 728, 34)
+        click(wid, 692, 34)
+        click(wid, 676, 34)
         run("xdotool", "windowfocus", wid)
         run("xdotool", "type", "--delay", "10", "Editor preset")
         run("xdotool", "key", "Return")
         wait_for(lambda: (config / "presets" / "Editor preset.sh").is_file())
+        click(wid, 548, 96)
+        presets = json.loads(call("presets", "--json"))["presets"]
+        assert next(p for p in presets if p["name"] == "Editor preset")["autoapply"]
+        click(wid, 548, 96)
 
         # The workflow invokes Launch with its picker contract, then runs the chosen action.
         picker = root / "launch"

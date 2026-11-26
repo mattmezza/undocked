@@ -1,8 +1,6 @@
 #include "painter.h"
 
-#include <X11/Xatom.h>
 #include <X11/Xutil.h>
-#include <X11/extensions/Xrender.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
@@ -25,13 +23,10 @@ typedef struct {
     Layout previous, extended;
     uint64_t checked;
     char reason[NAME], profile[NAME], status[ERROR_SIZE];
-    long long settle, deadline, lid_check, next_tray, badges_until, last_resume;
-    bool lid, checked_lid, tray, tray_dirty, force_hook, previous_valid;
-    Window icon, tray_owner, badges[OUTPUTS];
-    GC icon_gc, badge_gc;
-    Colormap icon_colormap;
-    Atom tray_visual, tray_colors, tray_selection, embed;
-    int icon_width, icon_height, tray_override;
+    long long settle, deadline, lid_check, badges_until, last_resume;
+    bool lid, checked_lid, force_hook, previous_valid;
+    Window badges[OUTPUTS];
+    GC badge_gc;
     Painter badge_painter;
     bool have_badge_painter;
 } Session;
@@ -183,21 +178,15 @@ rpc(const Request *request, Reply *reply, bool start_daemon)
 }
 
 static void
-spawn(const char *command, const char *reason, const char *profile)
+run_hook(const char *command, const char *reason, const char *profile)
 {
     pid_t child = fork();
     if (child != 0) return;
-    if (command) {
-        setenv("UNDOCKED_REASON", reason, 1);
-        setenv("UNDOCKED_PRESET", profile, 1);
-        int input = open("/dev/null", O_RDONLY);
-        if (input >= 0) { dup2(input, STDIN_FILENO); close(input); }
-        execl("/bin/sh", "sh", "-c", command, (char *)NULL);
-    } else {
-        const char *exec = executable();
-        if (profile) execl(exec, "undocked", profile, (char *)NULL);
-        else execl(exec, "undocked", (char *)NULL);
-    }
+    setenv("UNDOCKED_REASON", reason, 1);
+    setenv("UNDOCKED_PRESET", profile, 1);
+    int input = open("/dev/null", O_RDONLY);
+    if (input >= 0) { dup2(input, STDIN_FILENO); close(input); }
+    execl("/bin/sh", "sh", "-c", command, (char *)NULL);
     _exit(127);
 }
 
@@ -259,169 +248,6 @@ identify(Session *s)
     }
     s->badges_until = now_ms() + s->config.identify * 1000LL;
     XFlush(d);
-}
-
-static cui_color
-tray_foreground(Session *s, Theme theme)
-{
-    Atom type;
-    int format;
-    unsigned long count, rest;
-    unsigned char *data = NULL;
-    cui_color color = theme.accent;
-    if (XGetWindowProperty(s->x.display, s->tray_owner, s->tray_colors, 0, 12, False,
-        XA_CARDINAL, &type, &format, &count, &rest, &data) == Success &&
-        format == 32 && count == 12 && data) {
-        unsigned long *channels = (unsigned long *)data;
-        color = (cui_color){channels[0] / 257, channels[1] / 257, channels[2] / 257, 255};
-    }
-    if (data) XFree(data);
-    return color;
-}
-
-static unsigned
-blend(unsigned ink, unsigned background, unsigned opacity)
-{
-    return (ink * opacity + background * (255 - opacity) + 127) / 255;
-}
-
-static void
-paint_tray(Session *s)
-{
-    s->tray_dirty = false;
-    Display *d = s->x.display;
-    XWindowAttributes attr;
-    if (!s->icon || !XGetWindowAttributes(d, s->icon, &attr) ||
-        attr.width < 1 || attr.height < 1 || attr.width > 256 || attr.height > 256) return;
-    Theme theme;
-    theme_read(&theme, &s->x, &s->config);
-    cui_color ink = tray_foreground(s, theme);
-    XRenderPictFormat *format = XRenderFindVisualFormat(d, attr.visual);
-    unsigned alpha = format && format->type == PictTypeDirect ? format->direct.alphaMask : 0;
-    cui_color background = alpha ? (cui_color){0} : theme.panel;
-    XImage *image = XCreateImage(d, attr.visual, (unsigned)attr.depth, ZPixmap, 0, NULL,
-                                 (unsigned)attr.width, (unsigned)attr.height, 32, 0);
-    if (!image) return;
-    image->data = calloc((size_t)image->bytes_per_line, (size_t)attr.height);
-    if (!image->data) { XDestroyImage(image); return; }
-    int size = attr.width < attr.height ? attr.width : attr.height;
-    int left = (attr.width - size) / 2, top = (attr.height - size) / 2;
-    for (int y = 0; y < attr.height; y++) {
-        for (int x = 0; x < attr.width; x++) {
-            unsigned a = x >= left && x < left + size && y >= top && y < top + size ?
-                icon_coverage(ICON_DISPLAYS, x - left, y - top, size) : 0;
-            unsigned long pixel = x11_color(attr.visual, blend(ink.r, background.r, a),
-                blend(ink.g, background.g, a), blend(ink.b, background.b, a));
-            if (alpha) pixel |= (unsigned long)((a * alpha + 127) / 255) << format->direct.alpha;
-            XPutPixel(image, x, y, pixel);
-        }
-    }
-    Pixmap pixmap = XCreatePixmap(d, s->icon, (unsigned)attr.width, (unsigned)attr.height, (unsigned)attr.depth);
-    XPutImage(d, pixmap, s->icon_gc, image, 0, 0, 0, 0, (unsigned)attr.width, (unsigned)attr.height);
-    XDestroyImage(image);
-    XSetWindowBackgroundPixmap(d, s->icon, pixmap);
-    XClearArea(d, s->icon, 0, 0, 0, 0, False);
-    XFreePixmap(d, pixmap);
-    s->icon_width = attr.width;
-    s->icon_height = attr.height;
-}
-
-static void
-drop_icon(Session *s)
-{
-    Display *d = s->x.display;
-    if (s->icon) XDestroyWindow(d, s->icon);
-    if (s->icon_gc) XFreeGC(d, s->icon_gc);
-    if (s->icon_colormap) XFreeColormap(d, s->icon_colormap);
-    s->icon = None;
-    s->icon_gc = NULL;
-    s->icon_colormap = None;
-    s->icon_width = s->icon_height = 0;
-}
-
-static void
-set_tray(Session *s)
-{
-    s->tray = s->tray_override < 0 ? s->config.tray : s->tray_override != 0;
-    s->next_tray = 0;
-    if (!s->tray) {
-        s->tray_dirty = false;
-        drop_icon(s);
-    }
-}
-
-static void
-dock_icon(Session *s)
-{
-    Display *d = s->x.display;
-    Window owner = XGetSelectionOwner(d, s->tray_selection);
-    if (owner == s->tray_owner && s->icon) return;
-    drop_icon(s);
-    s->tray_owner = owner;
-    if (!owner) return;
-
-    Visual *visual = DefaultVisual(d, s->x.screen);
-    int depth = DefaultDepth(d, s->x.screen);
-    int format, count;
-    unsigned long length, rest;
-    Atom type;
-    unsigned char *data = NULL;
-    if (XGetWindowProperty(d, owner, s->tray_visual, 0, 1, False, XA_VISUALID,
-        &type, &format, &length, &rest, &data) == Success && format == 32 && length == 1 && data) {
-        XVisualInfo wanted = {.visualid = *(unsigned long *)data, .screen = s->x.screen};
-        XVisualInfo *info = XGetVisualInfo(d, VisualIDMask | VisualScreenMask, &wanted, &count);
-        if (info && count && info->class == TrueColor) { visual = info->visual; depth = info->depth; }
-        if (info) XFree(info);
-    }
-    if (data) XFree(data);
-    s->icon_colormap = XCreateColormap(d, s->x.root, visual, AllocNone);
-    XSetWindowAttributes attrs = {.colormap = s->icon_colormap, .background_pixel = 0, .border_pixel = 0,
-        .event_mask = ButtonPressMask | StructureNotifyMask};
-    XSelectInput(d, owner, StructureNotifyMask | PropertyChangeMask);
-    s->icon = XCreateWindow(d, s->x.root, 0, 0, 22, 22, 0, depth, InputOutput, visual,
-                            CWColormap | CWBackPixel | CWBorderPixel | CWEventMask, &attrs);
-    x11_class(&s->x, s->icon, "undocked-tray", "Undocked");
-    XStoreName(d, s->icon, "Undocked Displays");
-    XSizeHints hints = {.flags = PMinSize | PBaseSize, .min_width = 12, .min_height = 12,
-                        .base_width = 22, .base_height = 22};
-    XSetWMNormalHints(d, s->icon, &hints);
-    Atom info_atom = XInternAtom(d, "_XEMBED_INFO", False);
-    unsigned long info[] = {0, 1};
-    XChangeProperty(d, s->icon, info_atom, info_atom, 32, PropModeReplace, (unsigned char *)info, 2);
-    s->icon_gc = XCreateGC(d, s->icon, 0, NULL);
-    XEvent message = {.xclient = {.type = ClientMessage, .display = d, .window = owner,
-        .message_type = XInternAtom(d, "_NET_SYSTEM_TRAY_OPCODE", False), .format = 32}};
-    message.xclient.data.l[2] = (long)s->icon;
-    XSendEvent(d, owner, False, NoEventMask, &message);
-    XFlush(d);
-}
-
-static void
-tray_event(Session *s, const XEvent *event)
-{
-    if (event->type == ClientMessage && event->xclient.window == s->icon &&
-        event->xclient.message_type == s->embed && event->xclient.data.l[1] == 0)
-        s->tray_dirty = true;
-    else if (event->type == MapNotify && event->xmap.window == s->icon) s->tray_dirty = true;
-    else if (event->type == ConfigureNotify && event->xconfigure.window == s->icon &&
-             (event->xconfigure.width != s->icon_width || event->xconfigure.height != s->icon_height))
-        s->tray_dirty = true;
-    else if (event->type == PropertyNotify &&
-             ((event->xproperty.window == s->tray_owner && event->xproperty.atom == s->tray_colors) ||
-              (event->xproperty.window == s->x.root && event->xproperty.atom == XA_RESOURCE_MANAGER)))
-        s->tray_dirty = true;
-    else if (event->type == DestroyNotify && event->xdestroywindow.window == s->icon) {
-        s->icon = None;
-        s->next_tray = 0;
-    } else if (event->type == ReparentNotify && event->xreparent.window == s->icon &&
-               event->xreparent.parent == s->x.root) {
-        s->tray_owner = None;
-        s->next_tray = 0;
-    } else if (event->type == ButtonPress && event->xbutton.window == s->icon) {
-        if (event->xbutton.button == Button1) spawn(NULL, NULL, NULL);
-        if (event->xbutton.button == Button2) identify(s);
-        if (event->xbutton.button == Button3) spawn(NULL, NULL, "launch");
-    }
 }
 
 static bool
@@ -575,7 +401,7 @@ reconcile(Session *s)
     bool effective = !layout_equal(&before, &after) ||
                      s->reported.width != s->topology.width || s->reported.height != s->topology.height;
     if ((effective || s->force_hook) && *s->config.hook)
-        spawn(s->config.hook, *s->reason ? s->reason : "external", s->profile);
+        run_hook(s->config.hook, *s->reason ? s->reason : "external", s->profile);
     s->reported = s->topology;
     s->settle = 0;
     s->force_hook = false;
@@ -640,17 +466,11 @@ process(Session *s, const Request *request, Reply *reply)
         identify(s);
         reply->ok = true;
         break;
-    case ENABLE_TRAY: case DISABLE_TRAY:
-        s->tray_override = request->command == ENABLE_TRAY;
-        set_tray(s);
-        reply->ok = true;
-        break;
     case RELOAD: {
         Config config;
         reply->ok = config_load(&config, error);
         if (reply->ok) {
             s->config = config;
-            set_tray(s);
             s->checked = 0;
             settle_after(s, NULL, NULL);
         }
@@ -667,13 +487,12 @@ process(Session *s, const Request *request, Reply *reply)
 }
 
 int
-daemon_main(int tray, bool startup)
+daemon_main(bool startup)
 {
     static Session s;
     char error[ERROR_SIZE], lock_path[sizeof(struct sockaddr_un)];
     struct sockaddr_un address;
     if (!config_load(&s.config, error)) goto fail;
-    s.tray_override = tray;
     if (!socket_address(&address)) {
         snprintf(error, sizeof error, "A valid DISPLAY and private runtime directory are required.");
         goto fail;
@@ -684,22 +503,18 @@ daemon_main(int tray, bool startup)
     }
     int lock = open(lock_path, O_CREAT | O_CLOEXEC | O_NOFOLLOW, 0600);
     if (lock < 0 || flock(lock, LOCK_EX | LOCK_NB)) {
-        if (lock >= 0) close(lock);
-        if (tray >= 0) {
-            Reply reply;
-            enum Command command = tray ? ENABLE_TRAY : DISABLE_TRAY;
-            if (!rpc(&(Request){.version = REQUEST_VERSION, .command = command}, &reply, false)) {
-                snprintf(error, sizeof error, "%s", reply.message);
-                goto fail;
-            }
+        int cause = errno;
+        if (lock >= 0) {
+            close(lock);
+            if (cause == EWOULDBLOCK) return 0;
         }
-        return 0;
+        snprintf(error, sizeof error, "Cannot acquire the Undocked session lock: %s", strerror(cause));
+        goto fail;
     }
     if (!x11_open(&s.x, error)) goto fail;
     s.backend = x11_backend(&s.x);
     if (!scan(&s, error)) goto fail;
     s.reported = s.topology;
-    set_tray(&s);
     s.lid = s.config.follow_lid && lid_closed();
     s.checked_lid = s.lid;
     s.checked = startup ? 0 : topology_key(&s.topology);
@@ -717,13 +532,6 @@ daemon_main(int tray, bool startup)
     signal(SIGTERM, stop);
     signal(SIGCHLD, SIG_IGN);
     Display *d = s.x.display;
-    char tray_selection[64];
-    snprintf(tray_selection, sizeof tray_selection, "_NET_SYSTEM_TRAY_S%d", s.x.screen);
-    s.tray_selection = XInternAtom(d, tray_selection, False);
-    s.tray_visual = XInternAtom(d, "_NET_SYSTEM_TRAY_VISUAL", False);
-    s.tray_colors = XInternAtom(d, "_NET_SYSTEM_TRAY_COLORS", False);
-    s.embed = XInternAtom(d, "_XEMBED", False);
-    XSelectInput(d, s.x.root, StructureNotifyMask | PropertyChangeMask);
     while (!stopping) {
         while (XPending(d)) {
             XEvent event;
@@ -731,17 +539,12 @@ daemon_main(int tray, bool startup)
             if (x11_change(&s.x, &event)) {
                 if (s.badges_until) close_badges(&s);
                 settle_after(&s, NULL, NULL);
-            } else if (s.tray) tray_event(&s, &event);
+            }
         }
         long long time = now_ms();
         if (s.deadline && time >= s.deadline && !restore(&s, error))
             fprintf(stderr, "undocked: rollback failed: %s\n", error);
         if (s.badges_until && time >= s.badges_until) close_badges(&s);
-        if (s.tray && time >= s.next_tray) {
-            dock_icon(&s);
-            s.next_tray = time + 1000;
-        }
-        if (s.tray_dirty) paint_tray(&s);
         if (time >= s.lid_check) {
             struct timespec boot;
             if (clock_gettime(CLOCK_BOOTTIME, &boot) == 0) {
@@ -778,7 +581,6 @@ daemon_main(int tray, bool startup)
     }
     if (s.deadline) (void)restore(&s, error);
     close_badges(&s);
-    drop_icon(&s);
     if (s.have_badge_painter) painter_close(&s.badge_painter);
     close(socket_fd);
     unlink(address.sun_path);

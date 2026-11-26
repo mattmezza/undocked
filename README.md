@@ -1,7 +1,7 @@
 # Undocked
 
 Arrange your X11 displays, save layouts, and switch automatically when your dock
-changes. Undocked puts the display editor, tray applet, and hotplug watcher in one
+changes. Undocked puts the display editor and hotplug watcher in one
 C program. It talks to RandR directly and uses [CUI](https://github.com/mattmezza/cui)
 for the editor.
 
@@ -19,38 +19,36 @@ with `sh -s -- v0.1.1`. Set `PREFIX` to choose another install prefix. You need
 an X11 session with RandR 1.3 or newer.
 
 Open the editor with `undocked`. For automatic switching, start the daemon from
-your X session startup script. The applet uses the existing XEmbed tray in
-[mwm](https://github.com/mattmezza/mwm).
+your X session startup script.
 
 ```sh
 undocked daemon &
 ```
 
-Left-click the tray icon for the editor, middle-click to identify screens, and
-right-click for the Launch picker. Set `tray = false` in the INI or start with
-`undocked daemon --no-tray` to run the watcher alone. The editor uses the
-`Undocked` window class and the X11 dialog type so mwm opens it centered and
-floating. The installer refreshes a running daemon in the current X session.
+The editor uses the `Undocked` window class and the X11 dialog type so mwm opens
+it centered and floating. The installer refreshes a running daemon in the
+current X session. Existing `tray` settings can be removed from `config.ini`.
 
 ## Arrange displays
 
 - Drag the numbered displays to arrange them. Edges snap together. Use the arrow
   keys to move the selected display, or hold Shift for larger steps.
 - Click **Identify** to see the same numbers on the active screens. Connector
-  names appear on the layout and in **Inspector**, including for disabled
-  displays.
-- Click a display tile to open the docked inspector and change its resolution,
-  refresh rate, orientation, primary status, or enabled state. Use **Mirror** or
-  one of the arrangement shortcuts below the canvas to start a layout.
+  names appear on the layout, including for disabled displays.
+- Click a display to open its full-height settings drawer. Select its resolution to open the list
+  of supported modes. **Arrange** opens the layout suggestions and Mirror or
+  Extend.
 - Click **Apply** and then **Keep**. Undocked restores the previous layout if the
   countdown expires. If the old layout is unavailable, it tries a connected
   output at a supported mode.
-- Open the **Presets** tab to load a saved layout or change its **Autoapply**
-  setting. **Save preset** opens the inline form and saves the active layout.
+- Open **Presets** to load a saved layout, see its script path, or toggle its
+  **Autoapply** checkbox. **New preset** opens a dialog to save the active layout.
 
-![Undocked's docked inspector showing a connector, resolution, and refresh rate](media/inspector.png)
+![Settings for a selected display showing its connector, resolution, and refresh rate](media/display-details.png)
 
-![The Presets tab with two saved layouts and the inline new preset form](media/preset.png)
+![The Presets screen showing two layouts with their file paths and Autoapply checkboxes](media/preset.png)
+
+![The New preset dialog over the dimmed Presets screen](media/preset-dialog.png)
 
 ## Presets and configuration
 
@@ -116,10 +114,16 @@ undocked recover
 Run `undocked --help` for the full command list. JSON output carries a schema
 version, and commands report failure through their exit status.
 
+A window manager such as mwm can use the same CLI from the user's X11 session.
+Run `undocked` to open the editor, `undocked launch` for the action menu, or
+`undocked identify` to show display numbers. Use `status --json` for display
+state and `presets --json` for saved presets and whether they match. The CLI
+connects to the session daemon and starts it on demand when needed.
+
 ## Build
 
 Source builds need a C11 toolchain, make, pkg-config, and the X11, RandR,
-Xrender, FreeType, and HarfBuzz development libraries. CUI and the fonts are bundled.
+FreeType, and HarfBuzz development libraries. CUI and the fonts are bundled.
 
 ```sh
 make
