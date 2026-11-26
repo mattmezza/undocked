@@ -35,20 +35,30 @@ current X session. Existing `tray` settings can be removed from `config.ini`.
   keys to move the selected display, or hold Shift for larger steps.
 - Click **Identify** to see the same numbers on the active screens. Connector
   names appear on the layout, including for disabled displays.
-- Click a display to open its full-height settings drawer. Select its resolution to open the list
-  of supported modes. **Arrange** opens the layout suggestions and Mirror or
+- Click a display to open its full-height settings drawer. Select its resolution
+  to browse the supported modes. The editor shows rates close to whole numbers
+  as **60 Hz**, for example, when that label identifies a single mode. JSON and
+  presets keep the exact RandR rate.
+- **Row**, **Column**, and **Two above** are shortcuts below the layout. Row
+  centers displays vertically, Column centers them horizontally, and Two above
+  appears for three displays. **More…** offers other alignments and Mirror or
   Extend.
 - Click **Apply** and then **Keep**. Undocked restores the previous layout if the
   countdown expires. If the old layout is unavailable, it tries a connected
   output at a supported mode.
-- Open **Presets** to load a saved layout, see its script path, or toggle its
-  **Autoapply** checkbox. **New preset** opens a dialog to save the active layout.
+- Open **Manage presets** to load a saved layout, see its script path, or
+  toggle **Autoapply**. An info button explains why a preset is unavailable.
+  **New preset** saves the active layout and turns spaces in the name into dashes.
 
 ![Settings for a selected display showing its connector, resolution, and refresh rate](media/display-details.png)
 
-![The Presets screen showing two layouts with their file paths and Autoapply checkboxes](media/preset.png)
+![More arrangements showing row and column alignments](media/arrangements.png)
 
-![The New preset dialog over the dimmed Presets screen](media/preset-dialog.png)
+![Manage presets showing two layouts with file paths and Autoapply checkboxes](media/preset.png)
+
+![The preset information dialog explaining which display setup is required](media/preset-info.png)
+
+![The New preset dialog over the dimmed Manage presets screen](media/preset-dialog.png)
 
 ## Presets and configuration
 
@@ -56,7 +66,7 @@ Copy [config.ini](config.ini) to `$XDG_CONFIG_HOME/undocked/config.ini`
 (default `~/.config/undocked/config.ini`). The file lists the defaults. Keep
 this directory in Stow to sync the settings and executable `presets/*.sh` files.
 Run a preset script directly, choose it from the editor, or call
-`undocked preset "Office dock"`. Undocked reads the saved layout records from
+`undocked preset office-dock`. Undocked reads the saved layout records from
 the script when matching or applying it.
 
 Automatic matching uses the full connected set, including outputs a preset
@@ -67,9 +77,10 @@ names. If several automatic presets match, choose one for autoapply. An
 unrecognized setup keeps its usable layout.
 
 To reapply a wallpaper, set `after_change` under `[undocked]` and run
-`undocked reload`. The hook runs once after the final layout settles, including
-changes from other X11 clients. It receives `DISPLAY`, `UNDOCKED_REASON`, and
-`UNDOCKED_PRESET`.
+`undocked reload`. The hook runs after each settled display change, including a
+preview, a rollback, and changes from other X11 clients. Keeping an already
+settled preview adds no hook run. The hook receives `DISPLAY`,
+`UNDOCKED_REASON`, and `UNDOCKED_PRESET`.
 
 ```ini
 after_change = if [ -r "$HOME/.fehbg" ]; then sh "$HOME/.fehbg"; fi
@@ -82,6 +93,10 @@ and supports `undocked.background`, `panel`, `foreground`, `muted`, `border`,
 `undocked.font` and `undocked.mono` to font file paths, or use the corresponding
 INI settings. Display numbers, connector names, resolutions, and refresh rates
 use the mono face.
+
+Set `quick_arrangements` under `[ui]` to choose and order the shortcuts. Leave
+it empty to put every layout under **More…**. Set `drawer_animation_ms = 0` to
+open the drawer immediately.
 
 ## Launch and scripts
 
@@ -101,10 +116,11 @@ command=undocked launch
 ```sh
 undocked status --json
 undocked presets --json
-undocked save 'Office dock' --auto
-undocked preset 'Office dock' --dry-run
-undocked preset 'Office dock'             # then run keep or revert
-undocked layout column --yes              # apply without the countdown
+undocked save office-dock --auto
+undocked preset office-dock --dry-run
+undocked preset office-dock               # then run keep or revert
+undocked layout row --yes                 # bottom aligned
+undocked layout column-right --yes
 undocked output DP-1 mode 2560x1440@60
 undocked output DP-1 primary
 undocked identify

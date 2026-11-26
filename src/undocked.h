@@ -49,13 +49,19 @@ typedef struct {
     Layout layout;
 } Preset;
 
+enum Arrangement {
+    ROW_TOP, ROW_CENTER, ROW_BOTTOM, COLUMN_LEFT, COLUMN_CENTER, COLUMN_RIGHT,
+    TWO_ABOVE, MIRROR, EXTEND, ARRANGEMENT_COUNT
+};
+
 typedef struct {
-    int settle, confirm, identify, width, height, snap, radius;
+    int settle, confirm, identify, width, height, snap, radius, drawer_ms;
     bool automatic, match_ports, follow_lid;
     char hook[PATH_SIZE], font[PATH_SIZE], mono[PATH_SIZE], presets[PATH_SIZE];
     char config[PATH_SIZE];
     char port[OUTPUTS][PORT], alias[OUTPUTS][NAME];
-    int aliases;
+    enum Arrangement quick[ARRANGEMENT_COUNT];
+    int aliases, quick_count;
 } Config;
 
 enum Command {
@@ -98,6 +104,7 @@ bool preset_write(const Config *, const Preset *, bool replace, char *);
 int preset_list(const Config *, char names[PRESETS][NAME]);
 
 bool same_mode(Mode, Mode);
+int display_rate(const Output *, Mode);
 void dimensions(Placement, int *, int *);
 Layout current_layout(const Topology *);
 bool layout_enable(const Topology *, Layout *, int, bool);
@@ -106,6 +113,8 @@ bool layout_mirrored(const Layout *);
 uint64_t topology_key(const Topology *);
 bool resolve_layout(const Topology *, const Layout *, bool, Layout *, char *);
 bool normalize_layout(const Topology *, Layout *, char *);
+const char *arrangement_key(enum Arrangement);
+enum Arrangement arrangement_kind(const char *);
 bool suggest(const Topology *, Layout *, const char *, char *);
 bool extend_layout(const Reply *, Layout *, char *);
 Layout recovery_layout(const Topology *, bool lid_closed);

@@ -2,6 +2,7 @@
 
 #include <X11/Xatom.h>
 #include <X11/Xutil.h>
+#include <X11/cursorfont.h>
 #include <X11/keysym.h>
 #include <math.h>
 #include <poll.h>
@@ -15,6 +16,8 @@ typedef struct {
     X11 x;
     Window window;
     Atom close, protocols, wake;
+    Cursor cursor[CUI_CURSOR_GRABBING + 1];
+    cui_cursor last_cursor;
     GC gc;
     Painter paint;
     Config config;
@@ -22,12 +25,15 @@ typedef struct {
     Layout base, draft, extended;
     bool editing, closing, mirrored, save_auto, have_extended, redraw;
     bool form, focus_name, save_enter, pointer_down, drag_moved, frame_ready;
+    bool quick_visible[ARRANGEMENT_COUNT], drawer_animating;
+    long long drawer_opened;
     size_t caret;
     int selected, dragging, start_x, start_y, from_x, from_y, offset, menu_count;
     float scale, origin_x, origin_y;
     cui_rect tiles[OUTPUTS], canvas;
     enum Page page;
     char name[NAME], notice[ERROR_SIZE], form_error[ERROR_SIZE];
+    char info_name[NAME], info[ERROR_SIZE];
     char presets[PRESETS][NAME];
 } Editor;
 
@@ -91,6 +97,7 @@ button(Editor *e, const char *key, cui_rect bounds, const char *name, enum Icon 
     }, bounds);
     cui_interaction state = cui_interact(ui, id, CUI_ROLE_BUTTON, cui_string(name), disabled,
                                          style == SELECTED, 0);
+    if (!disabled) cui_set_cursor(ui, id, CUI_CURSOR_POINTER);
     cui_begin_box(ui, 0, (cui_box){.row = true, .gap = 7, .align_y = CUI_ALIGN_CENTER});
     paint_icon(ui, icon, 16, fg);
     if (!icon_only)
@@ -178,6 +185,7 @@ receive(Editor *e, Reply reply, bool reset)
             e->selected = -1;
             if (e->page == DISPLAY_MODES) e->page = DISPLAYS;
             e->form = false;
+            *e->info = 0;
             strcpy(e->notice, "Connected displays changed. Layout refreshed.");
         }
         if (e->selected >= e->draft.count) e->selected = -1;
@@ -280,7 +288,10 @@ tile(Editor *e, int n, cui_rect r, bool disabled)
         .radius = t.radius}, r);
     cui_interaction clicked = cui_interact(ui, element, CUI_ROLE_BUTTON, cui_string(p->port),
                                           disabled, n == e->selected, 0);
+    if (!disabled)
+        cui_set_cursor(ui, element, p->enabled && !e->mirrored ? CUI_CURSOR_GRAB : CUI_CURSOR_POINTER);
     if (clicked.activated && !e->drag_moved) {
+        if (e->selected < 0) e->drawer_opened = now_ms();
         e->selected = n;
         e->redraw = true;
     }
@@ -357,11 +368,11 @@ draw_canvas(Editor *e, cui_rect frame, bool disabled)
 }
 
 static void
-mode_text(char *text, size_t size, Mode mode)
+mode_text(char *text, size_t size, const Output *output, Mode mode)
 {
     if (mode.millihz)
         snprintf(text, size, "%d×%d · %g Hz", mode.width, mode.height,
-                 round(mode.millihz / 10.0) / 100);
+                 display_rate(output, mode) / 1000.0);
     else snprintf(text, size, "%d×%d", mode.width, mode.height);
 }
 
@@ -379,6 +390,7 @@ checkbox(Editor *e, const char *key, cui_rect bounds, const char *name,
         .radius = t.radius
     }, bounds);
     cui_interaction state = cui_interact(ui, id, CUI_ROLE_CHECKBOX, cui_string(name), disabled, checked, 0);
+    if (!disabled) cui_set_cursor(ui, id, CUI_CURSOR_POINTER);
     float y = floorf((bounds.h - 16) / 2);
     cui_color mark = checked ? t.accent : mix(t.border, t.muted, .4f);
     if (disabled) mark = t.border;
@@ -407,6 +419,7 @@ action_row(Editor *e, const char *key, cui_rect bounds, const char *name, enum I
         .border = t.accent, .border_width = !disabled && last.focus_visible ? 1 : 0
     }, bounds);
     cui_interaction state = cui_interact(ui, id, CUI_ROLE_BUTTON, cui_string(name), disabled, selected, 0);
+    if (!disabled) cui_set_cursor(ui, id, CUI_CURSOR_POINTER);
     float x = 10, y = floorf((bounds.h - 16) / 2);
     if (icon != ICON_NONE) {
         icon_at(e, icon, x, y, 16, ink);
@@ -440,6 +453,7 @@ open_page(Editor *e, enum Page page)
     e->page = page;
     e->offset = 0;
     e->form = false;
+    *e->info = 0;
     *e->notice = 0;
     if (page == PRESETS_PAGE) e->menu_count = preset_list(&e->config, e->presets);
 }
@@ -457,7 +471,6 @@ draw_details(Editor *e, cui_rect frame, bool disabled)
     cui_context *ui = e->paint.ui;
     cui_begin_absolute_box(ui, cui_id_from(ui, "details"), (cui_box){
         .background = mix(t.background, t.panel, .76f)}, frame);
-    fill(e, (cui_rect){0, 0, 1, frame.h}, mix(t.background, t.border, .5f), 0);
     int selected = e->selected;
     Placement *p = &e->draft.output[selected];
     const Output *output = &e->live.topology.output[selected];
@@ -476,7 +489,7 @@ draw_details(Editor *e, cui_rect frame, bool disabled)
         layout_enable(&e->live.topology, &e->draft, selected, !p->enabled)) edit(e);
     if (p->enabled) {
         label(e, (cui_rect){18, 148, w, 19}, "Resolution and refresh rate", 12, t.muted, true, false);
-        mode_text(text, sizeof text, p->mode);
+        mode_text(text, sizeof text, output, p->mode);
         if (action_row(e, "mode", (cui_rect){8, 169, w + 10, 32}, text,
                        ICON_NONE, ICON_FORWARD, false, disabled, true)) {
             open_page(e, DISPLAY_MODES);
@@ -526,7 +539,7 @@ draw_modes(Editor *e, bool blocked)
         int i = j + e->offset;
         char id[28], text[80];
         Mode mode = output->modes[i];
-        mode_text(text, sizeof text, mode);
+        mode_text(text, sizeof text, output, mode);
         if (i == output->preferred) strcat(text, "  ·  Preferred");
         snprintf(id, sizeof id, "mode-%d", i);
         bool selected = same_mode(mode, p->mode);
@@ -540,29 +553,99 @@ draw_modes(Editor *e, bool blocked)
     page_control(e, w - 24, h - 48, output->count, rows);
 }
 
+static const struct {
+    const char *name, *alignment;
+    enum Icon icon;
+} arrangements[ARRANGEMENT_COUNT] = {
+    [ROW_TOP] = {"Row top", "Top", ICON_ROW},
+    [ROW_CENTER] = {"Row", "Middle", ICON_ROW},
+    [ROW_BOTTOM] = {"Row bottom", "Bottom", ICON_ROW},
+    [COLUMN_LEFT] = {"Column left", "Left", ICON_COLUMN},
+    [COLUMN_CENTER] = {"Column", "Center", ICON_COLUMN},
+    [COLUMN_RIGHT] = {"Column right", "Right", ICON_COLUMN},
+    [TWO_ABOVE] = {"Two above", NULL, ICON_TWO_ABOVE},
+    [MIRROR] = {"Mirror", NULL, ICON_MIRROR},
+    [EXTEND] = {"Extend", NULL, ICON_MONITOR}
+};
+
+static bool
+show_arrangement(const Editor *e, enum Arrangement arrangement)
+{
+    int usable = 0;
+    for (int i = 0; i < e->live.topology.count; i++) usable += e->live.topology.output[i].count > 0;
+    if (usable < 2) return false;
+    if (arrangement == TWO_ABOVE) return usable == 3;
+    if (arrangement == MIRROR) return !e->mirrored;
+    if (arrangement == EXTEND) return e->mirrored;
+    return true;
+}
+
+static void
+choose_arrangement(Editor *e, enum Arrangement arrangement)
+{
+    if (arrangement == MIRROR || arrangement == EXTEND) set_mirror(e, arrangement == MIRROR);
+    else use_suggestion(e, arrangement_key(arrangement));
+}
+
+static void
+draw_shortcuts(Editor *e, float w, float y)
+{
+    const Config *config = &e->config;
+    int available = 0, requested = 0, shown = 0;
+    float widths[ARRANGEMENT_COUNT] = {0}, total = 0;
+    const float left = 24, right = w - 24, more_width = 76;
+    float x = left;
+    memset(e->quick_visible, 0, sizeof e->quick_visible);
+    for (enum Arrangement i = 0; i < ARRANGEMENT_COUNT; i++) available += show_arrangement(e, i);
+    for (int i = 0; i < config->quick_count; i++) {
+        enum Arrangement kind = config->quick[i];
+        if (!show_arrangement(e, kind)) continue;
+        widths[kind] = ceilf(cui_measure_text_ex(e->paint.ui, cui_string(arrangements[kind].name), 14,
+            (cui_text_style){.weight = CUI_TEXT_WEIGHT_MEDIUM}).width) + 37;
+        total += widths[kind] + 3;
+        requested++;
+    }
+    if (button(e, "identify", (cui_rect){x, y, 84, 33}, "Identify", ICON_EYE,
+               QUIET, !main_display(&e->base), false, false)) ask(e, IDENTIFY, NULL);
+    x += 94;
+    float limit = requested < available || x + total > right ? right - more_width : right;
+    for (int i = 0; i < config->quick_count; i++) {
+        enum Arrangement kind = config->quick[i];
+        float width = widths[kind];
+        if (!width || x + width > limit) continue;
+        e->quick_visible[kind] = true;
+        shown++;
+        if (button(e, arrangement_key(kind), (cui_rect){x, y, width, 33}, arrangements[kind].name,
+                   arrangements[kind].icon, QUIET, false, false, false)) choose_arrangement(e, kind);
+        x += width + 3;
+    }
+    if (shown < available &&
+        button(e, "arrange", (cui_rect){fminf(x, right - more_width), y, more_width, 33},
+               "More…", ICON_MORE, QUIET, false, false, false)) open_page(e, ARRANGE);
+}
+
 static void
 draw_arrangements(Editor *e, bool blocked)
 {
-    static const struct { const char *key, *name; enum Icon icon; } choices[] = {
-        {"row", "Row", ICON_ROW}, {"column", "Column", ICON_COLUMN},
-        {"y", "Two above", ICON_TWO_ABOVE}, {"mirror", "Mirror", ICON_MIRROR},
-        {"extend", "Extend", ICON_MONITOR}
-    };
-    subpage_title(e, "Arrange displays", blocked);
-    float y = 70;
-    for (size_t i = 0; i < sizeof choices / sizeof *choices; i++) {
-        const char *kind = choices[i].key;
-        if ((!strcmp(kind, "y") && e->draft.count != 3) ||
-            (!strcmp(kind, "extend") && !e->mirrored) ||
-            (!strcmp(kind, "mirror") && e->mirrored)) continue;
-        if (action_row(e, kind, (cui_rect){23, y, e->paint.width - 46, 40},
-                       choices[i].name, choices[i].icon, ICON_NONE, false, blocked, false)) {
-            if (!strcmp(kind, "mirror") || !strcmp(kind, "extend")) set_mirror(e, !e->mirrored);
-            else use_suggestion(e, kind);
-            e->page = DISPLAYS;
-            break;
+    static const char *const groups[] = {"Row alignment", "Column alignment", "Other layouts"};
+    Theme t = e->paint.theme;
+    float y = 72, width = fminf(155, (e->paint.width - 65) / 3.0f);
+    subpage_title(e, "More arrangements", blocked);
+    for (int group = 0; group < 3; group++) {
+        int column = 0;
+        for (enum Arrangement kind = group * 3, end = (group + 1) * 3; kind < end; kind++) {
+            if (e->quick_visible[kind] || !show_arrangement(e, kind)) continue;
+            if (!column) label(e, (cui_rect){26, y, 200, 22}, groups[group], 13, t.muted, false, false);
+            const char *name = arrangements[kind].alignment ? arrangements[kind].alignment : arrangements[kind].name;
+            if (action_row(e, arrangement_key(kind), (cui_rect){23 + column * (width + 8), y + 27, width, 39},
+                           name, arrangements[kind].icon, ICON_NONE, false, blocked, false)) {
+                open_page(e, DISPLAYS);
+                choose_arrangement(e, kind);
+                return;
+            }
+            column++;
         }
-        y += 44;
+        if (column) y += 90;
     }
 }
 
@@ -570,7 +653,7 @@ static void
 save(Editor *e)
 {
     if (!preset_name(e->name)) {
-        strcpy(e->form_error, "Use letters, digits, spaces, dots, - or _.");
+        strcpy(e->form_error, "Start with a letter or digit. Use letters, digits, -, _ or .");
         return;
     }
     Preset preset = {.automatic = e->save_auto, .layout = e->base};
@@ -581,23 +664,30 @@ save(Editor *e)
     snprintf(e->notice, sizeof e->notice, "Saved %.63s.", e->name);
 }
 
+static bool
+begin_dialog(Editor *e, const char *key, const char *title, cui_rect bounds)
+{
+    Theme t = e->paint.theme;
+    cui_context *ui = e->paint.ui;
+    fill(e, (cui_rect){0, 0, e->paint.width, e->paint.height}, (cui_color){0, 0, 0, 155}, 0);
+    if (!cui_begin_focus_scope(ui, cui_id_from(ui, "dialog-scope"), true)) return false;
+    cui_id id = cui_id_from(ui, key);
+    cui_begin_absolute_box(ui, id, (cui_box){.background = t.panel, .radius = t.radius}, bounds);
+    cui_interact(ui, id, CUI_ROLE_DIALOG, cui_string(title), false, false, 0);
+    cui_drop_shadow shadow = {.offset_y = 8, .sigma = 14, .color = {0, 0, 0, 152}};
+    cui_set_drop_shadows(ui, &shadow, 1, (cui_corner_radii){t.radius, t.radius, t.radius, t.radius});
+    label(e, (cui_rect){20, 12, bounds.w - 40, 32}, title, 22, t.foreground, false, false);
+    return true;
+}
+
 static void
 draw_preset_form(Editor *e, float width, float height)
 {
     Theme t = e->paint.theme;
     cui_context *ui = e->paint.ui;
     float w = fminf(376, width - 32), h = 214;
-    fill(e, (cui_rect){0, 0, width, height}, (cui_color){0, 0, 0, 155}, 0);
-    cui_id scope = cui_id_from(ui, "preset-dialog-scope");
-    if (!cui_begin_focus_scope(ui, scope, true)) return;
-    cui_begin_absolute_box(ui, cui_id_from(ui, "preset-dialog"), (cui_box){
-        .background = t.panel, .radius = t.radius}, (cui_rect){floorf((width - w) / 2),
-        floorf((height - h) / 2), w, h});
-    cui_interact(ui, cui_id_from(ui, "preset-dialog"), CUI_ROLE_DIALOG,
-                 cui_string("New preset"), false, false, 0);
-    cui_drop_shadow shadow = {.offset_y = 8, .sigma = 14, .color = {0, 0, 0, 152}};
-    cui_set_drop_shadows(ui, &shadow, 1, (cui_corner_radii){t.radius, t.radius, t.radius, t.radius});
-    label(e, (cui_rect){20, 12, w - 40, 32}, "New preset", 22, t.foreground, false, false);
+    if (!begin_dialog(e, "preset-dialog", "New preset",
+        (cui_rect){floorf((width - w) / 2), floorf((height - h) / 2), w, h})) return;
     label(e, (cui_rect){20, 50, w - 40, 21}, "Name", 13, t.muted, false, false);
 
     cui_id input = cui_id_from(ui, "preset-name");
@@ -605,6 +695,7 @@ draw_preset_form(Editor *e, float width, float height)
     cui_begin_absolute_box(ui, input, (cui_box){.background = t.background, .radius = t.radius,
         .border = focused ? t.accent : t.border, .border_width = 1}, (cui_rect){20, 75, w - 40, 37});
     cui_interact(ui, input, CUI_ROLE_TEXTBOX, cui_string("Preset name"), false, false, 0);
+    cui_set_cursor(ui, input, CUI_CURSOR_TEXT);
     cui_set_semantic_text_value_v1(ui, input, cui_string(e->name));
     if (e->focus_name) {
         cui_focus(ui, input);
@@ -618,7 +709,8 @@ draw_preset_form(Editor *e, float width, float height)
         visible = (cui_str){e->name + start, e->caret - start};
     }
     float caret_x = cui_measure_text_ex(ui, visible, 15, regular).width;
-    label(e, (cui_rect){10, 0, w - 60, 37}, e->name + start, 15, t.foreground, false, false);
+    label(e, (cui_rect){*e->name || !focused ? 10 : 13, 0, w - 60, 37},
+          *e->name ? e->name + start : "e.g. home-dock", 15, *e->name ? t.foreground : t.muted, false, false);
     if (focused) fill(e, (cui_rect){10 + floorf(caret_x), 10, 1, 17}, t.accent, 0);
     cui_end_box(ui);
 
@@ -634,12 +726,31 @@ draw_preset_form(Editor *e, float width, float height)
 }
 
 static void
+draw_preset_info(Editor *e, float width, float height)
+{
+    Theme t = e->paint.theme;
+    cui_context *ui = e->paint.ui;
+    float w = fminf(430, width - 32), h = 189;
+    if (!begin_dialog(e, "preset-info", "Preset can’t be loaded",
+        (cui_rect){floorf((width - w) / 2), floorf((height - h) / 2), w, h})) return;
+    label(e, (cui_rect){20, 47, w - 40, 24}, e->info_name, 14, t.accent, false, false);
+    cui_begin_absolute_box(ui, 0, (cui_box){.clip = true}, (cui_rect){20, 81, w - 40, 51});
+    cui_text_paragraph_colored(ui, cui_string(e->info), 14, t.foreground, 19,
+                               (cui_text_style){0}, true, NULL, 0);
+    cui_end_box(ui);
+    if (button(e, "info-close", (cui_rect){w - 98, h - 48, 78, 32}, "Done",
+               ICON_NONE, PRIMARY, false, false, false)) *e->info = 0;
+    cui_end_box(ui);
+    cui_end_focus_scope(ui);
+}
+
+static void
 draw_presets(Editor *e, bool blocked)
 {
     Theme t = e->paint.theme;
     float w = (float)e->paint.width, h = (float)e->paint.height;
     bool can_save = !blocked && main_display(&e->base) && !e->editing;
-    subpage_title(e, "Presets", blocked);
+    subpage_title(e, "Manage presets", blocked);
     if (button(e, "new-preset", (cui_rect){w - 145, 19, 121, 32}, "New preset", ICON_PLUS,
                PRIMARY, !can_save, false, false)) {
         e->form = e->focus_name = true;
@@ -687,8 +798,14 @@ draw_presets(Editor *e, bool blocked)
                 open_page(e, DISPLAYS);
                 edit(e);
             }
-        } else label(e, (cui_rect){w - 126, y + 13, 102, 31}, read ? "Different setup" :
-                     "Unavailable", 12, t.muted, false, true);
+        } else {
+            snprintf(id, sizeof id, "info-%s", e->presets[i]);
+            if (button(e, id, (cui_rect){w - 83, y + 13, 39, 31}, "Why can’t I load this preset?",
+                       ICON_INFO, QUIET, blocked, false, true)) {
+                strcpy(e->info_name, e->presets[i]);
+                strcpy(e->info, error);
+            }
+        }
     }
     page_control(e, w - 24, h - 48, e->menu_count, rows);
 }
@@ -698,18 +815,14 @@ draw_displays(Editor *e, bool blocked)
 {
     Theme t = e->paint.theme;
     float side = drawer_width(e), w = e->paint.width - side, h = (float)e->paint.height;
-    label(e, (cui_rect){24, 13, w - 168, 43}, "Displays", 27, t.foreground, false, false);
-    if (action_row(e, "nav-presets", (cui_rect){w - 121, 19, 97, 32}, "Presets", ICON_NONE,
+    icon_at(e, ICON_MONITOR, 24, 23, 23, t.foreground);
+    label(e, (cui_rect){55, 13, w - 230, 43}, "Displays", 27, t.foreground, false, false);
+    if (action_row(e, "nav-presets", (cui_rect){w - 176, 19, 152, 32}, "Manage presets", ICON_NONE,
                    ICON_FORWARD, false, blocked, false)) open_page(e, PRESETS_PAGE);
     draw_canvas(e, (cui_rect){24, 63, w - 48, h - 145}, blocked);
-    if (side) draw_details(e, (cui_rect){w, 0, side, h}, blocked);
 
     if (!blocked) {
-        if (button(e, "identify", (cui_rect){23, h - 53, 84, 33}, "Identify", ICON_EYE,
-                   QUIET, !main_display(&e->base), false, false)) ask(e, IDENTIFY, NULL);
-        if (e->draft.count > 1 &&
-            button(e, "arrange", (cui_rect){111, h - 53, 91, 33}, "Arrange", ICON_ROW,
-                   QUIET, false, false, false)) open_page(e, ARRANGE);
+        draw_shortcuts(e, w, h - (e->editing ? 86 : 53));
         if (e->editing) {
             if (button(e, "reset", (cui_rect){w - 182, h - 53, 66, 33}, "Reset", ICON_NONE,
                        QUIET, false, false, false)) {
@@ -720,6 +833,65 @@ draw_displays(Editor *e, bool blocked)
                        PRIMARY, false, false, false)) ask(e, APPLY, &e->draft);
         }
     }
+    if (side && e->selected >= 0) {
+        cui_context *ui = e->paint.ui;
+        float progress = 1;
+        if (e->config.drawer_ms && !cui_reduced_motion(ui))
+            progress = fminf(1, (now_ms() - e->drawer_opened) / (float)e->config.drawer_ms);
+        e->drawer_animating = progress < 1;
+        float remaining = 1 - progress;
+        cui_begin_absolute_box(ui, 0, (cui_box){.clip = true}, (cui_rect){w, 0, side, h});
+        draw_details(e, (cui_rect){roundf(side * remaining * remaining * remaining), 0, side, h}, blocked);
+        cui_end_box(ui);
+    }
+}
+
+static Cursor
+hand_cursor(Display *display, Window window, bool closed)
+{
+    /* '#' is the outline and '.' is the fill in these X11 cursor bitmaps. */
+    static const char open_hand[16][17] = {
+        "                ", "      #         ", "     #.# #      ", "     #.# #.#    ",
+        "   # #.# #.# #  ", "  #.##.###.##.# ", "  #...........# ", "   #..........# ",
+        " ## #.........# ", "#..##.........# ", " #...........#  ", "  #..........#  ",
+        "   #........#   ", "    #.......#   ", "     #######    ", "                "
+    };
+    static const char closed_hand[16][17] = {
+        "                ", "                ", "      ###       ", "    ##...###    ",
+        "   #...#...###  ", "  #..#...#....# ", " #.....#...#..# ", " #.........#..# ",
+        "  ###.........# ", " #............# ", "  #..........#  ", "   #.........#  ",
+        "    #.......#   ", "    #.......#   ", "     #######    ", "                "
+    };
+    const char (*shape)[17] = closed ? closed_hand : open_hand;
+    char source[32] = {0}, mask[32] = {0};
+    for (int y = 0; y < 16; y++) {
+        for (int x = 0; x < 16; x++) {
+            int byte = y * 2 + x / 8, bit = 1 << (x % 8);
+            if (shape[y][x] == '#') source[byte] |= bit;
+            if (shape[y][x] == '#' || shape[y][x] == '.') mask[byte] |= bit;
+        }
+    }
+    Pixmap pixels = XCreateBitmapFromData(display, window, source, 16, 16);
+    Pixmap visible = XCreateBitmapFromData(display, window, mask, 16, 16);
+    XColor black = {0}, white = {.red = 65535, .green = 65535, .blue = 65535};
+    Cursor cursor = XCreatePixmapCursor(display, pixels, visible, &black, &white, 7, 7);
+    XFreePixmap(display, pixels);
+    XFreePixmap(display, visible);
+    return cursor;
+}
+
+static void
+publish_cursor(Editor *e, cui_cursor cursor)
+{
+    if (cursor == e->last_cursor) return;
+    e->last_cursor = cursor;
+    if (cursor <= CUI_CURSOR_GRABBING && e->cursor[cursor])
+        XDefineCursor(e->x.display, e->window, e->cursor[cursor]);
+    else XUndefineCursor(e->x.display, e->window);
+    /* The implicit X11 button grab keeps the old cursor until it is updated. */
+    if (cursor == CUI_CURSOR_GRABBING)
+        XChangeActivePointerGrab(e->x.display, PointerMotionMask | ButtonReleaseMask,
+                                 e->cursor[cursor], CurrentTime);
 }
 
 static void
@@ -729,8 +901,9 @@ draw(Editor *e)
     Theme t = e->paint.theme;
     cui_context *ui = e->paint.ui;
     if (!cui_begin_frame(ui, (float)w, (float)h, .016f)) return;
+    e->drawer_animating = false;
     bool pending = e->live.remaining > 0;
-    bool modal = e->form && !pending;
+    bool modal = (e->form || *e->info) && !pending;
     cui_begin_box(ui, cui_id_from(ui, "window"), (cui_box){.width = (float)w, .height = (float)h});
     cui_begin_absolute_box(ui, 0, (cui_box){.inert = modal}, (cui_rect){0, 0, w, h});
     switch (e->page) {
@@ -751,13 +924,19 @@ draw(Editor *e)
         if (button(e, "keep", (cui_rect){action_width - 105, h - 53, 81, 33}, "Keep", ICON_NONE,
                    PRIMARY, false, false, false)) ask(e, KEEP, NULL);
     } else if (*e->notice) {
-        label(e, (cui_rect){25, h - (e->page == DISPLAYS ? 79 : 52), action_width - 111, 26},
+        bool actions = e->page == DISPLAYS && e->editing;
+        label(e, (cui_rect){25, h - (e->page == DISPLAYS && !actions ? 79 : 52),
+              action_width - (actions ? 218 : 111), 26},
               e->notice, 13, t.muted, false, false);
     }
     cui_end_box(ui);
-    if (modal) draw_preset_form(e, w, h);
+    if (modal) {
+        if (e->form) draw_preset_form(e, w, h);
+        else draw_preset_info(e, w, h);
+    }
     cui_end_box(ui);
     painter_present(&e->paint, &e->x, e->window, e->gc, cui_end_frame(ui));
+    publish_cursor(e, e->dragging >= 0 ? CUI_CURSOR_GRABBING : cui_pointer_cursor(ui));
     e->frame_ready = true;
     XFlush(e->x.display);
 }
@@ -824,7 +1003,7 @@ handle_pointer(Editor *e, XEvent event)
         return;
     }
     if (!motion && event.xbutton.button != Button1) {
-        bool pager = !e->form && (e->page == PRESETS_PAGE || e->page == DISPLAY_MODES);
+        bool pager = !e->form && !*e->info && (e->page == PRESETS_PAGE || e->page == DISPLAY_MODES);
         if (press && pager && event.xbutton.button == Button4 && e->offset > 0) e->offset--;
         if (press && pager && event.xbutton.button == Button5) e->offset++;
         return;
@@ -874,6 +1053,7 @@ keyboard(Editor *e, XKeyEvent event)
     if (down && symbol == XK_Escape) {
         if (e->live.remaining) ask(e, REVERT, NULL);
         else if (e->form) e->form = false;
+        else if (*e->info) *e->info = 0;
         else if (e->page != DISPLAYS) open_page(e, DISPLAYS);
         else if (e->selected >= 0) e->selected = -1;
         else e->closing = true;
@@ -904,7 +1084,7 @@ keyboard(Editor *e, XKeyEvent event)
         default:
             if (n == 1 && length < NAME - 1 && bytes[0] >= 32 && bytes[0] <= 126 && !(event.state & ControlMask)) {
                 memmove(e->name + e->caret + 1, e->name + e->caret, length - e->caret + 1);
-                e->name[e->caret++] = bytes[0];
+                e->name[e->caret++] = bytes[0] == ' ' ? '-' : bytes[0];
                 return;
             }
         }
@@ -1019,6 +1199,10 @@ editor_main(void)
     e.window = XCreateSimpleWindow(d, e.x.root, left > 0 ? left : 0, top > 0 ? top : 0,
         (unsigned)width, (unsigned)height, 0, 0, 0);
     e.gc = XCreateGC(d, e.window, 0, NULL);
+    e.cursor[CUI_CURSOR_POINTER] = XCreateFontCursor(d, XC_hand2);
+    e.cursor[CUI_CURSOR_TEXT] = XCreateFontCursor(d, XC_xterm);
+    e.cursor[CUI_CURSOR_GRAB] = hand_cursor(d, e.window, false);
+    e.cursor[CUI_CURSOR_GRABBING] = hand_cursor(d, e.window, true);
     x11_class(&e.x, e.window, "undocked", "Undocked");
     XStoreName(d, e.window, "Undocked");
     Atom dialog = XInternAtom(d, "_NET_WM_WINDOW_TYPE_DIALOG", False);
@@ -1045,7 +1229,7 @@ editor_main(void)
     }
     XMapRaised(d, e.window);
     bool dirty = true;
-    long long next = 0;
+    long long next = 0, next_frame = 0;
     while (!e.closing) {
         while (XPending(d)) {
             XEvent event;
@@ -1093,8 +1277,12 @@ editor_main(void)
                     dirty = true;
                 }
                 break;
-            case LeaveNotify:
-                cui_queue_event(e.paint.ui, (cui_event){.type = CUI_EVENT_POINTER_LEAVE});
+            case EnterNotify: case LeaveNotify:
+                cui_queue_event(e.paint.ui, (cui_event){
+                    .type = event.type == EnterNotify ? CUI_EVENT_POINTER_ENTER : CUI_EVENT_POINTER_LEAVE});
+                if (event.type == EnterNotify)
+                    cui_queue_event(e.paint.ui, (cui_event){.type = CUI_EVENT_POINTER_MOVE,
+                        .x = (float)event.xcrossing.x, .y = (float)event.xcrossing.y});
                 dirty = true;
                 break;
             case FocusOut:
@@ -1116,14 +1304,16 @@ editor_main(void)
                 strcmp(previous, e.live.message)) dirty = true;
             next = time + 400;
         }
-        if (dirty && !e.closing) {
+        if ((dirty || (e.drawer_animating && time >= next_frame)) && !e.closing) {
             e.redraw = false;
             draw(&e);
             dirty = e.redraw;
+            next_frame = time + 16;
         }
         if (dirty) continue;
         struct pollfd events = {ConnectionNumber(d), POLLIN, 0};
-        poll(&events, 1, 100);
+        int timeout = e.drawer_animating ? (int)fmax(0, next_frame - now_ms()) : 100;
+        poll(&events, 1, timeout);
     }
     painter_close(&e.paint);
     XFreeGC(d, e.gc);

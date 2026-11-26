@@ -21,7 +21,10 @@ static const char usage[] =
     "  load FILE [--dry-run|--yes]         Apply a portable preset script\n"
     "  save NAME [--auto] [--replace]      Save the current layout as a script\n"
     "  auto NAME on|off                   Set automatic matching for a preset\n"
-    "  layout row|column|y|mirror|extend [--dry-run|--yes]\n"
+    "  layout ARRANGEMENT [--dry-run|--yes]\n"
+    "    row (bottom), row-top, row-center, row-bottom\n"
+    "    column (center), column-left, column-center, column-right\n"
+    "    y (two above), mirror, extend\n"
     "  output PORT on|off|primary|mode WxH[@Hz]|rotate DEG|move X Y [--dry-run|--yes]\n"
     "  identify | keep | revert | recover | reload\n";
 
@@ -182,7 +185,8 @@ set_mode(const Output *out, Placement *p, const char *s)
     } else if (s[consumed]) return false;
     for (int i = 0; i < out->count; i++) {
         Mode m = out->modes[i];
-        if (m.width == w && m.height == h && (s[consumed] != '@' || m.millihz == rate)) {
+        if (m.width == w && m.height == h && (s[consumed] != '@' || m.millihz == rate ||
+                                             display_rate(out, m) == rate)) {
             p->mode = m;
             p->enabled = true;
             return true;
@@ -323,8 +327,8 @@ launch_mode(const Output *out, Mode *mode, char *error)
     snprintf(prompt, sizeof prompt, "Modes for %s", out->current.port);
     for (int i = 0; i < out->count; i++) {
         Mode m = out->modes[i];
-        snprintf(choices[i].label, sizeof choices[i].label, "%d × %d  ·  %.3f Hz%s",
-            m.width, m.height, m.millihz / 1000.0, same_mode(m, out->current.mode) ? "  (current)" : "");
+        snprintf(choices[i].label, sizeof choices[i].label, "%d × %d  ·  %g Hz%s", m.width, m.height,
+            display_rate(out, m) / 1000.0, same_mode(m, out->current.mode) ? "  (current)" : "");
     }
     int selected = launch_pick(prompt, choices, out->count, error);
     if (selected < 0) return false;

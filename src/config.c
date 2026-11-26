@@ -66,6 +66,22 @@ parse_bool(const char *s, bool *value)
 }
 
 static bool
+parse_arrangements(char *value, Config *config)
+{
+    bool seen[ARRANGEMENT_COUNT] = {0};
+    config->quick_count = 0;
+    for (char *key = strsep(&value, ","); key; key = strsep(&value, ",")) {
+        key = trim(key);
+        if (!*key && !value && !config->quick_count) return true;
+        enum Arrangement arrangement = arrangement_kind(key);
+        if (arrangement == ARRANGEMENT_COUNT || seen[arrangement]) return false;
+        seen[arrangement] = true;
+        config->quick[config->quick_count++] = arrangement;
+    }
+    return true;
+}
+
+static bool
 path_value(char *path, const char *value, const char *relative)
 {
     if (*value == '/')
@@ -85,7 +101,8 @@ bool
 config_load(Config *config, char *error)
 {
     *config = (Config){.settle = 650, .confirm = 15, .identify = 4, .width = 760,
-                       .height = 500, .snap = 14, .radius = -1, .automatic = true};
+                       .height = 500, .snap = 14, .radius = -1, .drawer_ms = 160, .automatic = true,
+                       .quick = {ROW_CENTER, COLUMN_CENTER, TWO_ABOVE}, .quick_count = 3};
     const char *home = getenv("HOME"), *xdg = getenv("XDG_CONFIG_HOME");
     char root[PATH_SIZE];
     int size;
@@ -151,6 +168,8 @@ config_load(Config *config, char *error)
             else if (!strcmp(key, "height")) valid = parse_int(value, &config->height, 480, 1440);
             else if (!strcmp(key, "snap_px")) valid = parse_int(value, &config->snap, 0, 60);
             else if (!strcmp(key, "corner_radius")) valid = parse_int(value, &config->radius, 0, 24);
+            else if (!strcmp(key, "drawer_animation_ms")) valid = parse_int(value, &config->drawer_ms, 0, 1000);
+            else if (!strcmp(key, "quick_arrangements")) valid = parse_arrangements(value, config);
             else if (!strcmp(key, "font")) valid = path_value(config->font, value, root);
             else if (!strcmp(key, "mono")) valid = path_value(config->mono, value, root);
             else valid = false;

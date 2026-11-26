@@ -6,7 +6,7 @@ icon_work=$(mktemp -d)
 trap 'rm -r "$icon_work"' EXIT
 origin=https://raw.githubusercontent.com/tailwindlabs/heroicons/v2.2.0/optimized/24/outline
 for icon_name in computer-desktop view-columns eye square-2-stack plus x-mark check \
-        arrow-left chevron-up chevron-down arrow-path; do
+        arrow-left chevron-up chevron-down arrow-path ellipsis-horizontal information-circle; do
     curl -fsSL --retry 3 "$origin/$icon_name.svg" -o "$icon_work/$icon_name.svg"
 done
 python3 - "$icon_work" <<'PY'
@@ -20,9 +20,9 @@ ns = '{http://www.w3.org/2000/svg}'
 def paths(name):
     return ''.join(f'<path d="{node.get("d")}"/>' for node in
                    ET.parse(source / (name + '.svg')).findall(ns + 'path'))
-def outline(body):
+def outline(body, weight):
     return (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" '
-            f'stroke="white" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round">{body}</svg>')
+            f'stroke="white" stroke-width="{weight}" stroke-linecap="round" stroke-linejoin="round">{body}</svg>')
 desktop = paths('computer-desktop')
 column = paths('view-columns')
 icons = [
@@ -34,9 +34,10 @@ icons = [
 ]
 icons += [paths(name) for name in ('eye', 'square-2-stack', 'plus', 'x-mark', 'check', 'arrow-left')]
 icons.append(f'<g transform="translate(24 0) scale(-1 1)">{paths("arrow-left")}</g>')
-icons += [paths(name) for name in ('chevron-up', 'chevron-down', 'arrow-path')]
+icons += [paths(name) for name in ('chevron-up', 'chevron-down', 'arrow-path', 'ellipsis-horizontal', 'information-circle')]
 with open('assets/icons.alpha', 'wb') as atlas:
-    for icon in icons:
-        png = subprocess.check_output(['rsvg-convert', '-w', '32', '-h', '32'], input=outline(icon).encode())
+    for index, icon in enumerate(icons):
+        weight = 2.5 if index in (6, 7, 9, 10, 11, 12, 14, 15) else 1.65
+        png = subprocess.check_output(['rsvg-convert', '-w', '32', '-h', '32'], input=outline(icon, weight).encode())
         atlas.write(subprocess.check_output(['magick', 'png:-', '-alpha', 'extract', '-depth', '8', 'gray:-'], input=png))
 PY

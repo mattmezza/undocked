@@ -28,7 +28,7 @@ void painter_repaint(Painter *, X11 *, Window, GC);
 enum Icon {
     ICON_NONE = -1, ICON_MONITOR, ICON_ROW, ICON_COLUMN, ICON_TWO_ABOVE, ICON_EYE,
     ICON_MIRROR, ICON_PLUS, ICON_CLOSE, ICON_CHECK, ICON_BACK, ICON_FORWARD,
-    ICON_UP, ICON_DOWN, ICON_RESET, ICON_COUNT
+    ICON_UP, ICON_DOWN, ICON_RESET, ICON_MORE, ICON_INFO, ICON_COUNT
 };
 bool paint_icon(cui_context *, enum Icon, float size, cui_color);
 void display_badge(Painter *, X11 *, Window, GC, const char *);

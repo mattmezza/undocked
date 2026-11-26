@@ -48,6 +48,11 @@ def click(wid, x, y):
     time.sleep(0.2)
 
 
+def hook_events(root):
+    path = root / "events"
+    return path.read_text().splitlines() if path.exists() else []
+
+
 def layout(root):
     status = state()
     outputs = status["outputs"]
@@ -57,15 +62,26 @@ def layout(root):
     call("layout", "y")
     y = state()
     assert y["confirmation_seconds"] > 0
-    assert y["outputs"][0]["position"][1] > 0
+    lower, *upper = y["outputs"]
+    top_height = max(out["mode"]["height"] for out in upper)
+    top_left = min(out["position"][0] for out in upper)
+    top_width = sum(out["mode"]["width"] for out in upper)
+    assert lower["position"][1] == top_height
+    assert abs(2 * (lower["position"][0] - top_left) + lower["mode"]["width"] - top_width) <= 1
+    for out in upper:
+        assert out["position"][1] == (top_height - out["mode"]["height"]) // 2
+    wait_for(lambda: hook_events(root) == ["apply:"])
+    assert state()["confirmation_seconds"] > 0
     call("keep")
-    hook = root / "events"
-    wait_for(hook.exists)
+    time.sleep(0.45)
+    assert hook_events(root) == ["apply:"]
     call("layout", "mirror")
     mirrored = state()
     assert all(out["position"] == [0, 0] for out in mirrored["outputs"])
+    wait_for(lambda: hook_events(root) == ["apply:", "apply:"])
     wait_for(lambda: not state()["confirmation_seconds"], seconds=7)
     assert state()["outputs"] == y["outputs"]
+    wait_for(lambda: hook_events(root) == ["apply:", "apply:", "revert:"])
     call("layout", "mirror", "--yes")
     call("layout", "extend", "--yes")
     assert state()["outputs"] == y["outputs"]
@@ -74,19 +90,33 @@ def layout(root):
     call("revert")
     assert state()["outputs"][1]["enabled"]
     time.sleep(0.65)
-    before = len(hook.read_text().splitlines())
+    before = len(hook_events(root))
 
     run("xrandr", "--output", "DUMMY1", "--off", "--set", "non-desktop", "1")
     wait_for(lambda: len(state()["outputs"]) == 2)
-    wait_for(lambda: len(hook.read_text().splitlines()) == before + 1)
+    wait_for(lambda: len(hook_events(root)) == before + 1)
     run("xrandr", "--output", "DUMMY1", "--set", "non-desktop", "0")
     wait_for(lambda: state()["status"] == "Automatic preset: Office dock")
     final = state()
     assert [out["position"] for out in final["outputs"]] == [out["position"] for out in outputs]
-    wait_for(lambda: len(hook.read_text().splitlines()) == before + 2)
+    wait_for(lambda: len(hook_events(root)) == before + 2)
     time.sleep(0.5)
-    assert len(hook.read_text().splitlines()) == before + 2
-    assert hook.read_text().splitlines()[-2:] == ["undock:", "dock:Office dock"]
+    assert len(hook_events(root)) == before + 2
+    assert hook_events(root)[-2:] == ["undock:", "dock:Office dock"]
+
+
+def check_alignment():
+    for axis, modes in ((1, ("row-top", "row-center", "row")), (0, ("column-left", "column", "column-right"))):
+        dimension = ("width", "height")[axis]
+        for divisor, kind in zip((0, 2, 1), modes):
+            call("layout", kind, "--yes")
+            outputs = state()["outputs"]
+            widest = max(out["mode"][dimension] for out in outputs)
+            assert len({out["mode"][dimension] for out in outputs}) > 1
+            for out in outputs:
+                spare = widest - out["mode"][dimension]
+                assert out["position"][axis] == (spare // divisor if divisor else 0)
+    call("preset", "Office dock", "--yes")
 
 
 with tempfile.TemporaryDirectory(prefix="undocked-test-") as temp:
@@ -121,6 +151,7 @@ with tempfile.TemporaryDirectory(prefix="undocked-test-") as temp:
         assert not json.loads(call("presets", "--json"))["presets"][0]["autoapply"]
         if multi:
             layout(root)
+            check_alignment()
         else:
             call("output", output, "off", "--yes", code=1)
             assert state()["outputs"][0]["enabled"]
@@ -135,6 +166,23 @@ with tempfile.TemporaryDirectory(prefix="undocked-test-") as temp:
         time.sleep(0.3)
         if multi:
             original = state()["outputs"]
+            # Quick Row is middle aligned. More offers the other alignments.
+            click(wid, 151, 464)
+            click(wid, 697, 464)
+            wait_for(lambda: state()["confirmation_seconds"] > 0)
+            preview = state()["outputs"]
+            assert preview[0]["position"][1] == (max(out["mode"]["height"] for out in preview) -
+                                                  preview[0]["mode"]["height"]) // 2
+            click(wid, 611, 464)
+            wait_for(lambda: state()["outputs"] == original)
+            click(wid, 415, 464)
+            click(wid, 250, 117)
+            click(wid, 697, 464)
+            wait_for(lambda: state()["confirmation_seconds"] > 0)
+            bottom = max(out["mode"]["height"] for out in original)
+            assert state()["outputs"][0]["position"][1] == bottom - original[0]["mode"]["height"]
+            click(wid, 611, 464)
+            wait_for(lambda: state()["outputs"] == original)
             run("xdotool", "mousemove", "--window", wid, "147", "233", "mousedown", "1",
                 "sleep", "0.2", "mousemove", "--window", wid, "195", "277",
                 "sleep", "0.2", "mouseup", "1")
@@ -162,10 +210,10 @@ with tempfile.TemporaryDirectory(prefix="undocked-test-") as temp:
         run("xdotool", "windowfocus", wid)
         run("xdotool", "type", "--delay", "10", "Editor preset")
         run("xdotool", "key", "Return")
-        wait_for(lambda: (config / "presets" / "Editor preset.sh").is_file())
+        wait_for(lambda: (config / "presets" / "Editor-preset.sh").is_file())
         click(wid, 548, 96)
         presets = json.loads(call("presets", "--json"))["presets"]
-        assert next(p for p in presets if p["name"] == "Editor preset")["autoapply"]
+        assert next(p for p in presets if p["name"] == "Editor-preset")["autoapply"]
         click(wid, 548, 96)
 
         # The workflow invokes Launch with its picker contract, then runs the chosen action.
@@ -183,7 +231,7 @@ printf '%s\\n' "$choices" | grep -Fx "$UNDOCKED_TEST_CHOICE" || exit 127
 
         choose("Identify displays")
         wait_for(lambda: window("Undocked Identify"))
-        choose("Switch to Editor preset")
+        choose("Switch to Editor-preset")
         if state()["confirmation_seconds"]:
             choose("Keep display changes")
         if multi:
@@ -194,7 +242,7 @@ printf '%s\\n' "$choices" | grep -Fx "$UNDOCKED_TEST_CHOICE" || exit 127
             assert state()["outputs"][1]["enabled"]
             choose("Revert display changes")
             assert not state()["outputs"][1]["enabled"]
-            choose("Switch to Editor preset")
+            choose("Switch to Editor-preset")
             assert state()["outputs"][1]["enabled"]
             choose("Keep display changes")
             choose("Mirror displays")

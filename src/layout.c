@@ -10,6 +10,29 @@ same_mode(Mode a, Mode b)
     return a.width == b.width && a.height == b.height && a.millihz == b.millihz;
 }
 
+static int
+nominal_rate(int rate)
+{
+    int rounded = (rate + 500) / 1000 * 1000;
+    int delta = rate - rounded;
+    return delta > -50 && delta < 50 ? rounded : rate;
+}
+
+int
+display_rate(const Output *output, Mode mode)
+{
+    int rate = nominal_rate(mode.millihz);
+    if (rate != mode.millihz) {
+        for (int i = 0; i < output->count; i++) {
+            Mode other = output->modes[i];
+            if (other.width == mode.width && other.height == mode.height &&
+                other.millihz != mode.millihz && nominal_rate(other.millihz) == rate)
+                return mode.millihz;
+        }
+    }
+    return rate;
+}
+
 void
 dimensions(Placement p, int *width, int *height)
 {
@@ -102,8 +125,9 @@ bool
 resolve_layout(const Topology *t, const Layout *saved, bool ports, Layout *layout, char *error)
 {
     if (saved->count != t->count || saved->count < 1 || saved->count > OUTPUTS) {
-        snprintf(error, ERROR_SIZE, "Preset expects %d connected outputs; found %d.",
-                 saved->count, t->count);
+        snprintf(error, ERROR_SIZE, "Saved with %d connected %s. There %s %d connected now.",
+                 saved->count, saved->count == 1 ? "display" : "displays",
+                 t->count == 1 ? "is" : "are", t->count);
         return false;
     }
     bool used[OUTPUTS] = {0};
@@ -233,13 +257,34 @@ recovery_layout(const Topology *t, bool closed)
     return result;
 }
 
+const char *
+arrangement_key(enum Arrangement arrangement)
+{
+    static const char *const keys[] = {
+        "row-top", "row-center", "row-bottom", "column-left", "column-center",
+        "column-right", "y", "mirror", "extend"
+    };
+    return keys[arrangement];
+}
+
+enum Arrangement
+arrangement_kind(const char *key)
+{
+    if (!strcmp(key, "row")) return ROW_BOTTOM;
+    if (!strcmp(key, "column")) return COLUMN_CENTER;
+    for (enum Arrangement i = 0; i < ARRANGEMENT_COUNT; i++)
+        if (!strcmp(key, arrangement_key(i))) return i;
+    return ARRANGEMENT_COUNT;
+}
+
 bool
 suggest(const Topology *t, Layout *layout, const char *kind, char *error)
 {
-    bool row = strcmp(kind, "row") == 0, column = strcmp(kind, "column") == 0;
-    bool y = strcmp(kind, "y") == 0, mirror = strcmp(kind, "mirror") == 0;
-    if (!row && !column && !y && !mirror) {
-        snprintf(error, ERROR_SIZE, "Choose row, column, y or mirror.");
+    enum Arrangement arrangement = arrangement_kind(kind);
+    bool column = arrangement >= COLUMN_LEFT && arrangement <= COLUMN_RIGHT;
+    bool y = arrangement == TWO_ABOVE, mirror = arrangement == MIRROR;
+    if (arrangement >= EXTEND) {
+        snprintf(error, ERROR_SIZE, "Unknown arrangement. See undocked --help for the available layouts.");
         return false;
     }
     int indices[OUTPUTS], count = 0, primary = -1, panel = -1;
@@ -291,7 +336,7 @@ suggest(const Topology *t, Layout *layout, const char *kind, char *error)
         }
     } else {
         int offset = 0, bottom = panel >= 0 ? panel : (primary >= 0 ? primary : indices[0]);
-        int top_height = 0;
+        int cross_size = 0;
         for (int i = 0; i < count; i++) {
             int index = indices[i];
             Placement *p = &layout->output[index];
@@ -302,19 +347,27 @@ suggest(const Topology *t, Layout *layout, const char *kind, char *error)
             p->x = column ? 0 : offset;
             p->y = column ? offset : 0;
             offset += column ? h : w;
-            if (h > top_height) top_height = h;
+            int cross = column ? w : h;
+            if (cross > cross_size) cross_size = cross;
         }
         if (y) {
             Placement *p = &layout->output[bottom];
             int w, h;
             dimensions(*p, &w, &h);
             p->x = (offset - w) / 2;
-            p->y = top_height;
-            for (int i = 0; i < count; i++) {
-                if (indices[i] == bottom) continue;
-                Placement *upper = &layout->output[indices[i]];
-                dimensions(*upper, &w, &h);
-                upper->y = top_height - h;
+            p->y = cross_size;
+        }
+        for (int i = 0; i < count; i++) {
+            if (y && indices[i] == bottom) continue;
+            Placement *p = &layout->output[indices[i]];
+            int w, h;
+            dimensions(*p, &w, &h);
+            if (column) {
+                int spare = cross_size - w;
+                p->x = arrangement == COLUMN_CENTER ? spare / 2 : (arrangement == COLUMN_RIGHT ? spare : 0);
+            } else {
+                int spare = cross_size - h;
+                p->y = (y || arrangement == ROW_CENTER) ? spare / 2 : (arrangement == ROW_TOP ? 0 : spare);
             }
         }
     }
