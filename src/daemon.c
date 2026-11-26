@@ -375,16 +375,13 @@ reconcile(Session *s)
     bool changed = s->checked != key || s->checked_lid != s->lid;
     if (s->deadline) {
         Layout unused;
-        if (!resolve_layout(&s->topology, &s->previous, true, &unused, error) &&
-            !restore(s, error)) fprintf(stderr, "undocked: recovery failed: %s\n", error);
-        else if (s->deadline) {
-            s->settle = 0;
-            return;
+        if (!resolve_layout(&s->topology, &s->previous, true, &unused, error)) {
+            if (!restore(s, error)) fprintf(stderr, "undocked: recovery failed: %s\n", error);
+            if (!scan(s, error)) return;
+            key = topology_key(&s->topology);
         }
-        if (!scan(s, error)) return;
-        key = topology_key(&s->topology);
     }
-    if (changed) {
+    if (changed && !s->deadline) {
         const char *cause = !s->checked ? "startup" :
             (s->topology.count > s->reported.count ? "dock" :
              (s->topology.count < s->reported.count ? "undock" :
