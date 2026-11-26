@@ -46,8 +46,11 @@ current X session. Existing `tray` settings can be removed from `config.ini`.
 - Click **Apply** and then **Keep**. Undocked restores the previous layout if the
   countdown expires. If the old layout is unavailable, it tries a connected
   output at a supported mode.
-- Open **Manage presets** to load a saved layout, see its script path, or
-  toggle **Autoapply**. An info button explains why a preset is unavailable.
+- Click the active preset name on **Displays** to open **Manage presets**.
+  Presets that match the current, confirmed layout are marked **Active**.
+  When several presets match, Displays shows the number of matches.
+  From this screen you can load a layout, see its script path, or toggle
+  **Autoapply**. An info button explains why a preset is unavailable.
   **New preset** saves the active layout and turns spaces in the name into dashes.
   Use the **…** button on a preset to rename it, overwrite it with the active
   layout, or delete it. Overwriting preserves **Autoapply**. Overwrite and
@@ -57,9 +60,11 @@ current X session. Existing `tray` settings can be removed from `config.ini`.
 
 ![More arrangements showing row and column alignments](media/arrangements.png)
 
-![Manage presets showing two layouts with file paths and Autoapply checkboxes](media/preset.png)
+![Manage presets with the current layout marked Active](media/preset.png)
 
 ![Preset actions for renaming, overwriting, or deleting a saved layout](media/preset-actions.png)
+
+![The Overwrite preset confirmation explaining what gets saved](media/preset-overwrite.png)
 
 ![The preset information dialog explaining which display setup is required](media/preset-info.png)
 

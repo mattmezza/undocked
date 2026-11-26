@@ -213,6 +213,9 @@ with tempfile.TemporaryDirectory(prefix="undocked-test-") as temp:
             wait_for(lambda: state()["outputs"] == original)
             click(wid, 728, 34)
         click(wid, 692, 34)
+        # The active preset remains loadable and the header opens the list again.
+        click(wid, 649, 96)
+        click(wid, 692, 34)
         click(wid, 676, 34)
         run("xdotool", "windowfocus", wid)
         run("xdotool", "type", "--delay", "10", "Editor preset")
