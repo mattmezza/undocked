@@ -11,7 +11,7 @@ typedef struct {
 
 typedef struct {
     XImage *image;
-    cui_font *font, *mono;
+    cui_font *font, *medium, *mono;
     cui_software *software;
     cui_context *ui;
     Theme theme;
@@ -22,7 +22,15 @@ bool painter_open(Painter *, X11 *, const Config *, int, int);
 bool painter_resize(Painter *, X11 *, int, int);
 void painter_close(Painter *);
 void painter_present(Painter *, X11 *, Window, GC, cui_draw_list);
-void theme_read(Theme *, X11 *);
-void display_icon(X11 *, Drawable, GC, int x, int y, int size, unsigned long color);
+void theme_read(Theme *, X11 *, const Config *);
+void painter_repaint(Painter *, X11 *, Window, GC);
+
+enum Icon {
+    ICON_NONE = -1, ICON_DISPLAYS, ICON_MONITOR, ICON_ROW, ICON_COLUMN, ICON_TWO_ABOVE,
+    ICON_EYE, ICON_INSPECT, ICON_MIRROR, ICON_PRESETS, ICON_PLUS, ICON_CLOSE, ICON_CHECK,
+    ICON_BACK, ICON_UP, ICON_DOWN, ICON_RESET, ICON_POWER, ICON_COUNT
+};
+bool paint_icon(cui_context *, enum Icon, float size, cui_color);
+unsigned icon_coverage(enum Icon, int x, int y, int size);
 void display_badge(Painter *, X11 *, Window, GC, const char *);
 #endif

@@ -47,4 +47,7 @@ pending=$(mktemp "$bindir/.undocked.XXXXXX")
 install -m 755 "$work/$asset" "$pending"
 mv -f "$pending" "$bindir/undocked"
 pending=
+if [ -n "${DISPLAY:-}" ] && "$bindir/undocked" --help | grep -q -- '--restart'; then
+    "$bindir/undocked" daemon --restart-if-running
+fi
 printf 'Installed %s at %s\n' "$version" "$bindir/undocked"

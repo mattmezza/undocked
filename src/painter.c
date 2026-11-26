@@ -3,11 +3,15 @@
 #include <X11/Xatom.h>
 #include <X11/Xresource.h>
 #include <X11/Xutil.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 extern const unsigned char geist_start[], geist_end[], geist_mono_start[], geist_mono_end[];
+extern const unsigned char geist_medium_start[], geist_medium_end[], undocked_icon_masks[];
+
+enum { ICON_PX = 32 };
 
 static cui_color
 rgb(unsigned hex)
@@ -49,13 +53,46 @@ database(X11 *x)
     return db;
 }
 
-void
-theme_read(Theme *theme, X11 *x)
+static double
+linear(unsigned component)
 {
-    *theme = (Theme){.background = rgb(0x171923), .panel = rgb(0x202330),
-        .foreground = rgb(0xc0caf5), .muted = rgb(0x9aa4c6), .border = rgb(0x373e56),
-        .accent = rgb(0x7aa2f7), .on_accent = rgb(0x131b2f), .warning = rgb(0xe0af68),
-        .radius = 8};
+    double s = component / 255.0;
+    return s <= 0.04045 ? s / 12.92 : pow((s + 0.055) / 1.055, 2.4);
+}
+
+static double
+luminance(cui_color c)
+{
+    return .2126 * linear(c.r) + .7152 * linear(c.g) + .0722 * linear(c.b);
+}
+
+static double
+contrast(cui_color a, cui_color b)
+{
+    double x = luminance(a), y = luminance(b);
+    return (fmax(x, y) + .05) / (fmin(x, y) + .05);
+}
+
+static cui_color
+readable(cui_color text, cui_color background, double ratio)
+{
+    cui_color dark = rgb(0x080b10), light = rgb(0xffffff);
+    cui_color end = contrast(light, background) >= contrast(dark, background) ? light : dark;
+    if (contrast(text, background) >= ratio) return text;
+    for (int step = 1; step < 16; step++) {
+        cui_color c = cui_color_mix_oklab(text, end, step / 16.0f);
+        if (contrast(c, background) >= ratio) return c;
+    }
+    return end;
+}
+
+void
+theme_read(Theme *theme, X11 *x, const Config *config)
+{
+    *theme = (Theme){.background = rgb(0x12151c), .panel = rgb(0x202631),
+        .foreground = rgb(0xf0f3fb), .muted = rgb(0xaebbd0), .border = rgb(0x484f61),
+        .accent = rgb(0x9ab9ff), .on_accent = rgb(0x111824), .warning = rgb(0xffc881),
+        .radius = 4};
     XrmDatabase db = database(x);
     color(db, "mwm.normbg", &theme->background);
     color(db, "mwm.statusbg", &theme->panel);
@@ -64,9 +101,6 @@ theme_read(Theme *theme, X11 *x)
     color(db, "mwm.selbg", &theme->accent);
     color(db, "mwm.selfg", &theme->on_accent);
     color(db, "mwm.systemwarn", &theme->warning);
-    if (theme->background.r == theme->panel.r && theme->background.g == theme->panel.g &&
-        theme->background.b == theme->panel.b)
-        theme->panel = cui_color_mix_oklab(theme->background, theme->border, .26f);
     color(db, "undocked.background", &theme->background);
     color(db, "undocked.panel", &theme->panel);
     color(db, "undocked.foreground", &theme->foreground);
@@ -75,13 +109,23 @@ theme_read(Theme *theme, X11 *x)
     color(db, "undocked.accent", &theme->accent);
     color(db, "undocked.onAccent", &theme->on_accent);
     color(db, "undocked.warning", &theme->warning);
+    if (contrast(theme->background, theme->panel) < 1.13) {
+        cui_color opposite = luminance(theme->background) < .32 ? rgb(0xffffff) : rgb(0x080b10);
+        theme->panel = cui_color_mix_oklab(theme->background, opposite, .085f);
+    }
+    theme->border = readable(theme->border, theme->panel, 1.65);
+    theme->foreground = readable(theme->foreground, theme->panel, 8.0);
+    theme->muted = readable(theme->muted, theme->panel, 5.2);
+    theme->accent = readable(theme->accent, theme->panel, 5.4);
+    theme->on_accent = readable(theme->on_accent, theme->accent, 7.0);
+    theme->warning = readable(theme->warning, theme->panel, 5.2);
     const char *radius = resource(db, "undocked.cornerRadius");
-    if (!radius) radius = resource(db, "mwm.segradius");
     if (radius) {
         char *end;
         long n = strtol(radius, &end, 10);
-        if (!*end && n >= 0 && n <= 24) theme->radius = (int)n;
+        if (*radius && !*end && n >= 0 && n <= 24) theme->radius = (int)n;
     }
+    if (config->radius >= 0) theme->radius = config->radius;
     if (db) XrmDestroyDatabase(db);
 }
 
@@ -110,19 +154,24 @@ bool
 painter_open(Painter *p, X11 *x, const Config *config, int width, int height)
 {
     *p = (Painter){0};
-    theme_read(&p->theme, x);
+    theme_read(&p->theme, x, config);
     XrmDatabase db = database(x);
     const char *font = *config->font ? config->font : resource(db, "undocked.font");
     const char *mono = *config->mono ? config->mono : resource(db, "undocked.mono");
     if (font && *font) p->font = cui_font_open(font);
     if (mono && *mono) p->mono = cui_font_open(mono);
     if (db) XrmDestroyDatabase(db);
-    if (!p->font)
+    if (!p->font) {
         p->font = cui_font_open_memory(geist_start, (size_t)((uintptr_t)geist_end - (uintptr_t)geist_start));
+        p->medium = cui_font_open_memory(geist_medium_start,
+            (size_t)((uintptr_t)geist_medium_end - (uintptr_t)geist_medium_start));
+    }
     if (!p->mono)
         p->mono = cui_font_open_memory(geist_mono_start, (size_t)((uintptr_t)geist_mono_end - (uintptr_t)geist_mono_start));
     if (!p->font || !p->mono) goto failed;
     cui_font_set_style(p->font, (cui_text_style){.monospace = true}, p->mono);
+    if (p->medium)
+        cui_font_set_style(p->font, (cui_text_style){.weight = CUI_TEXT_WEIGHT_MEDIUM}, p->medium);
     p->ui = cui_create((cui_config){.width = (float)width, .height = (float)height,
         .max_elements = 2048, .max_commands = 4096, .frame_bytes = 256 * 1024,
         .measure = cui_font_measure, .measure_styled = cui_font_measure_styled,
@@ -141,6 +190,7 @@ painter_close(Painter *p)
     cui_software_destroy(p->software);
     cui_destroy(p->ui);
     cui_font_close(p->font);
+    cui_font_close(p->medium);
     cui_font_close(p->mono);
 }
 
@@ -163,26 +213,42 @@ painter_present(Painter *p, X11 *x, Window window, GC gc, cui_draw_list list)
             } else XPutPixel(p->image, j, y, x11_color(visual, rgba[0], rgba[1], rgba[2]));
         }
     }
-    XPutImage(x->display, window, gc, p->image, 0, 0, 0, 0, (unsigned)p->width, (unsigned)p->height);
+    painter_repaint(p, x, window, gc);
 }
 
 void
-display_icon(X11 *x, Drawable drawable, GC gc, int left, int top, int size, unsigned long color)
+painter_repaint(Painter *p, X11 *x, Window window, GC gc)
 {
-    /* Two overlapping Heroicons desktop outlines, with the back stand occluded. */
-    Display *d = x->display;
-    int small = size * 2 / 3, step = size - small - 2, tall = size / 2 - 2;
-    XSetForeground(d, gc, color);
-    XSetLineAttributes(d, gc, size >= 21 ? 2 : 1, LineSolid, CapRound, JoinRound);
-    XDrawLine(d, drawable, gc, left + step, top + 1, left + size - 2, top + 1);
-    XDrawLine(d, drawable, gc, left + size - 2, top + 1, left + size - 2, top + tall + 1);
-    XDrawLine(d, drawable, gc, left + small, top + tall + 1, left + size - 2, top + tall + 1);
-    XDrawLine(d, drawable, gc, left + step, top + 1, left + step, top + step);
-    XDrawRectangle(d, drawable, gc, left + 1, top + step, (unsigned)(small - 1), (unsigned)tall);
-    XDrawLine(d, drawable, gc, left + small / 2, top + step + tall,
-              left + small / 2, top + step + tall + 3);
-    XDrawLine(d, drawable, gc, left + small / 4, top + step + tall + 3,
-              left + 3 * small / 4, top + step + tall + 3);
+    XPutImage(x->display, window, gc, p->image, 0, 0, 0, 0, (unsigned)p->width, (unsigned)p->height);
+}
+
+unsigned
+icon_coverage(enum Icon icon, int x, int y, int size)
+{
+    const unsigned char *mask = undocked_icon_masks + icon * ICON_PX * ICON_PX;
+    return mask[(2 * y + 1) * ICON_PX / (2 * size) * ICON_PX + (2 * x + 1) * ICON_PX / (2 * size)];
+}
+
+bool
+paint_icon(cui_context *ui, enum Icon icon, float size, cui_color foreground)
+{
+    static unsigned char pixels[ICON_COUNT][ICON_PX * ICON_PX * 4];
+    static bool initialized;
+    if (icon == ICON_NONE) return false;
+    if (!initialized) {
+        for (int i = 0; i < ICON_COUNT; i++) {
+            for (int j = 0; j < ICON_PX * ICON_PX; j++) {
+                unsigned char *p = &pixels[i][j * 4];
+                p[0] = p[1] = p[2] = 255;
+                p[3] = undocked_icon_masks[i * ICON_PX * ICON_PX + j];
+            }
+        }
+        initialized = true;
+    }
+    return cui_paint_bitmap(ui, 0, (cui_bitmap_paint){
+        .bitmap = {pixels[icon], ICON_PX, ICON_PX, ICON_PX * 4, 1},
+        .opacity = 1, .custom_tint = true, .tint = foreground
+    }, (cui_box){.width = size, .height = size});
 }
 
 void
@@ -193,7 +259,7 @@ display_badge(Painter *p, X11 *x, Window window, GC gc, const char *number)
     cui_size metrics = cui_font_measure_styled(p->font, cui_string(number), size, mono);
     cui_draw_command cmds[] = {
         {.type = CUI_DRAW_RECT, .bounds = {0, 0, (float)p->width, (float)p->height},
-         .color = p->theme.accent},
+         .color = p->theme.accent, .radius = p->theme.radius},
         {.type = CUI_DRAW_TEXT, .bounds = {(p->width - metrics.width) / 2, (p->height - metrics.height) / 2,
                                         metrics.width, metrics.height},
          .color = p->theme.on_accent, .text = cui_string(number), .font_size = size, .text_style = mono}

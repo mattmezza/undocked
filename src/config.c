@@ -25,7 +25,13 @@ executable(void)
     static char path[PATH_SIZE];
     if (!*path) {
         ssize_t size = readlink("/proc/self/exe", path, sizeof path - 1);
-        if (size > 0) path[size] = 0;
+        if (size > 0) {
+            path[size] = 0;
+            const char deleted[] = " (deleted)";
+            if ((size_t)size >= sizeof deleted - 1 &&
+                !strcmp(path + size - (sizeof deleted - 1), deleted))
+                path[size - (sizeof deleted - 1)] = 0;
+        }
     }
     return *path ? path : "/proc/self/exe";
 }
@@ -79,7 +85,7 @@ bool
 config_load(Config *config, char *error)
 {
     *config = (Config){.settle = 650, .confirm = 15, .identify = 4, .width = 900,
-                       .height = 640, .snap = 14, .automatic = true};
+                       .height = 640, .snap = 14, .radius = -1, .automatic = true, .tray = true};
     const char *home = getenv("HOME"), *xdg = getenv("XDG_CONFIG_HOME");
     char root[PATH_SIZE];
     int size;
@@ -129,6 +135,7 @@ config_load(Config *config, char *error)
             config->aliases++;
         } else if (!strcmp(section, "undocked")) {
             if (!strcmp(key, "autoapply")) valid = parse_bool(value, &config->automatic);
+            else if (!strcmp(key, "tray")) valid = parse_bool(value, &config->tray);
             else if (!strcmp(key, "match_ports")) valid = parse_bool(value, &config->match_ports);
             else if (!strcmp(key, "follow_lid")) valid = parse_bool(value, &config->follow_lid);
             else if (!strcmp(key, "settle_ms")) valid = parse_int(value, &config->settle, 100, 10000);
@@ -143,6 +150,7 @@ config_load(Config *config, char *error)
             if (!strcmp(key, "width")) valid = parse_int(value, &config->width, 640, 1920);
             else if (!strcmp(key, "height")) valid = parse_int(value, &config->height, 480, 1440);
             else if (!strcmp(key, "snap_px")) valid = parse_int(value, &config->snap, 0, 60);
+            else if (!strcmp(key, "corner_radius")) valid = parse_int(value, &config->radius, 0, 24);
             else if (!strcmp(key, "font")) valid = path_value(config->font, value, root);
             else if (!strcmp(key, "mono")) valid = path_value(config->mono, value, root);
             else valid = false;

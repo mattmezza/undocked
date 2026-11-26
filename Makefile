@@ -3,9 +3,9 @@ PKG_CONFIG ?= pkg-config
 PREFIX ?= /usr/local
 BINDIR ?= $(PREFIX)/bin
 DATADIR ?= $(PREFIX)/share/undocked
-VERSION ?= 0.1.0
+VERSION ?= 0.1.1
 BUILD ?= build
-PACKAGES = x11 xrandr freetype2 harfbuzz
+PACKAGES = x11 xrandr xrender freetype2 harfbuzz
 
 CPPFLAGS += -D_GNU_SOURCE -DCUI_HAS_TEXT=1 -Ivendor/cui/include -Ivendor/cui/third_party/clay \
             $(shell $(PKG_CONFIG) --cflags $(PACKAGES))
@@ -43,7 +43,7 @@ $(BUILD)/vendor/%.o: vendor/%.c Makefile
 	@mkdir -p $(@D)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -MMD -MP -c $< -o $@
 
-$(BUILD)/assets/fonts.o: assets/fonts.S assets/Geist-Regular.ttf assets/GeistMono-Regular.ttf
+$(BUILD)/assets/fonts.o: assets/fonts.S assets/Geist-Regular.ttf assets/Geist-Medium.ttf assets/GeistMono-Regular.ttf assets/icons.alpha
 	@mkdir -p $(@D)
 	$(CC) -c $< -o $@
 

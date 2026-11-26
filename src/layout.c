@@ -28,6 +28,30 @@ current_layout(const Topology *topology)
 }
 
 bool
+layout_enable(const Topology *t, Layout *layout, int index, bool enabled)
+{
+    Placement *p = &layout->output[index];
+    if (p->enabled == enabled) return true;
+    if (enabled) {
+        const Output *out = &t->output[index];
+        if (!out->count) return false;
+        int right = 0;
+        for (int i = 0; i < layout->count; i++) {
+            Placement other = layout->output[i];
+            if (!other.enabled) continue;
+            int w, h;
+            dimensions(other, &w, &h);
+            if (other.x + w > right) right = other.x + w;
+        }
+        p->mode = out->modes[out->preferred];
+        p->x = right;
+        p->y = 0;
+    }
+    p->enabled = enabled;
+    return true;
+}
+
+bool
 layout_equal(const Layout *a, const Layout *b)
 {
     if (a->count != b->count)

@@ -135,8 +135,8 @@ with tempfile.TemporaryDirectory(prefix="undocked-test-") as temp:
         time.sleep(0.3)
         if multi:
             original = state()["outputs"]
-            run("xdotool", "mousemove", "--window", wid, "175", "250", "mousedown", "1",
-                "sleep", "0.2", "mousemove", "--window", wid, "240", "312",
+            run("xdotool", "mousemove", "--window", wid, "248", "275", "mousedown", "1",
+                "sleep", "0.2", "mousemove", "--window", wid, "313", "337",
                 "sleep", "0.2", "mouseup", "1")
             time.sleep(0.2)
             click(wid, 837, 615)
@@ -155,14 +155,38 @@ with tempfile.TemporaryDirectory(prefix="undocked-test-") as temp:
         picker.write_text("""#!/bin/sh
 test "$1" = pick && test "$2" = --require-match || exit 99
 choices=$(cat)
-printf '%s\\n' "$choices" | grep -Fx 'Switch to Editor preset' >/dev/null || exit 98
-printf '%s\\n' 'Identify displays'
+printf '%s\\n' "$choices" | grep -Fx "$UNDOCKED_TEST_CHOICE" || exit 127
 """)
         picker.chmod(0o755)
-        os.environ["PATH"] = f"{root}:{os.environ['PATH']}"
-        call("launch")
+
+        def choose(label):
+            os.environ["UNDOCKED_TEST_CHOICE"] = label
+            call("launch")
+
+        choose("Identify displays")
         wait_for(lambda: window("Undocked Identify"))
-        run("xdotool", "windowfocus", wid, "key", "Escape")
+        choose("Switch to Editor preset")
+        if state()["confirmation_seconds"]:
+            choose("Keep display changes")
+        if multi:
+            choose("Disable DUMMY1")
+            assert not state()["outputs"][1]["enabled"]
+            choose("Keep display changes")
+            choose("Enable DUMMY1")
+            assert state()["outputs"][1]["enabled"]
+            choose("Revert display changes")
+            assert not state()["outputs"][1]["enabled"]
+            choose("Switch to Editor preset")
+            assert state()["outputs"][1]["enabled"]
+            choose("Keep display changes")
+            choose("Mirror displays")
+            assert all(out["position"] == [0, 0] for out in state()["outputs"])
+            choose("Keep display changes")
+            choose("Restore extended layout")
+            assert any(out["position"] != [0, 0] for out in state()["outputs"])
+            choose("Keep display changes")
+        time.sleep(0.45)
+        run("xdotool", "windowfocus", wid, "key", "--delay", "150", "Escape", "Escape")
         assert editor.wait(timeout=5) == 0
     finally:
         if editor and editor.poll() is None:

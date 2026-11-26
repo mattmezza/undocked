@@ -50,8 +50,8 @@ typedef struct {
 } Preset;
 
 typedef struct {
-    int settle, confirm, identify, width, height, snap;
-    bool automatic, match_ports, follow_lid;
+    int settle, confirm, identify, width, height, snap, radius;
+    bool automatic, match_ports, follow_lid, tray;
     char hook[PATH_SIZE], font[PATH_SIZE], mono[PATH_SIZE], presets[PATH_SIZE];
     char config[PATH_SIZE];
     char port[OUTPUTS][PORT], alias[OUTPUTS][NAME];
@@ -59,7 +59,7 @@ typedef struct {
 } Config;
 
 enum Command {
-    GET = 1, TEST, APPLY, KEEP, REVERT, RECOVER, IDENTIFY, ENABLE_TRAY, RELOAD
+    GET = 1, TEST, APPLY, KEEP, REVERT, RECOVER, IDENTIFY, ENABLE_TRAY, RELOAD, DISABLE_TRAY
 };
 enum { REQUEST_VERSION = 1, IMMEDIATE = 1, STRICT_PORTS = 2 };
 
@@ -99,6 +99,7 @@ int preset_list(const Config *, char names[PRESETS][NAME]);
 bool same_mode(Mode, Mode);
 void dimensions(Placement, int *, int *);
 Layout current_layout(const Topology *);
+bool layout_enable(const Topology *, Layout *, int, bool);
 bool layout_equal(const Layout *, const Layout *);
 bool layout_mirrored(const Layout *);
 uint64_t topology_key(const Topology *);
@@ -110,7 +111,8 @@ Layout recovery_layout(const Topology *, bool lid_closed);
 bool lid_closed(void);
 
 bool rpc(const Request *, Reply *, bool start);
-int daemon_main(bool tray, bool reconcile);
+int daemon_main(int tray, bool reconcile);
+int daemon_restart(bool only_running);
 int editor_main(void);
 int launch_main(void);
 
