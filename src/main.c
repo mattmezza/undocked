@@ -20,6 +20,9 @@ static const char usage[] =
     "  preset NAME [--dry-run|--yes]       Apply a saved preset\n"
     "  load FILE [--dry-run|--yes]         Apply a portable preset script\n"
     "  save NAME [--auto] [--replace]      Save the current layout as a script\n"
+    "  overwrite NAME                    Update a preset with the current layout\n"
+    "  rename NAME NEW_NAME               Rename a saved preset\n"
+    "  delete NAME                       Delete a saved preset\n"
     "  auto NAME on|off                   Set automatic matching for a preset\n"
     "  layout ARRANGEMENT [--dry-run|--yes]\n"
     "    row (bottom), row-top, row-center, row-bottom\n"
@@ -471,12 +474,20 @@ main(int argc, char **argv)
         return preset_write(&config, &preset, replace, error) ? 0 : fail(error);
     }
     if (!strcmp(command, "auto") && argc == 4) {
-        Preset preset;
         if (strcmp(argv[3], "on") && strcmp(argv[3], "off")) return fail("Use undocked auto NAME on|off.");
-        if (!read_named(&config, argv[2], &preset, error)) return fail(error);
-        preset.automatic = !strcmp(argv[3], "on");
-        return preset_write(&config, &preset, true, error) ? 0 : fail(error);
+        return preset_set_automatic(&config, argv[2], !strcmp(argv[3], "on"), error) ? 0 : fail(error);
     }
+    if (!strcmp(command, "overwrite") && argc == 3) {
+        if (!get(&reply)) return fail(reply.message);
+        if (reply.remaining) return fail("Keep the pending layout before saving it.");
+        Layout layout = current_layout(&reply.topology);
+        if (!normalize_layout(&reply.topology, &layout, error)) return fail(error);
+        return preset_overwrite(&config, argv[2], &layout, error) ? 0 : fail(error);
+    }
+    if (!strcmp(command, "rename") && argc == 4)
+        return preset_rename(&config, argv[2], argv[3], error) ? 0 : fail(error);
+    if (!strcmp(command, "delete") && argc == 3)
+        return preset_delete(&config, argv[2], error) ? 0 : fail(error);
     if (argc == 3 || argc == 4) {
         bool dry = false, yes = false;
         if (argc == 3 || apply_option(argv[3], &dry, &yes)) {

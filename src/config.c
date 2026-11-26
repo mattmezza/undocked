@@ -3,13 +3,20 @@
 #include <ctype.h>
 #include <dirent.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/file.h>
 #include <sys/stat.h>
+#include <sys/syscall.h>
 #include <time.h>
 #include <unistd.h>
+
+#ifndef RENAME_NOREPLACE
+#define RENAME_NOREPLACE 1u
+#endif
 
 long long
 now_ms(void)
@@ -282,15 +289,30 @@ mkdirs(char *path)
     }
 }
 
-bool
-preset_write(const Config *config, const Preset *preset, bool replace, char *error)
+static int
+lock_presets(const Config *config, bool create, char *error)
 {
-    char path[PATH_SIZE], parent[PATH_SIZE], temp[PATH_SIZE];
-    if (!preset_path(config, preset->name, path, error)) return false;
-    strcpy(parent, config->presets);
-    if (!mkdirs(parent) ||
-        snprintf(temp, sizeof temp, "%s/.undocked-XXXXXX", parent) >= (int)sizeof temp) {
-        snprintf(error, ERROR_SIZE, "Cannot create the presets directory.");
+    if (create) {
+        char parent[PATH_SIZE];
+        strcpy(parent, config->presets);
+        if (!mkdirs(parent)) {
+            snprintf(error, ERROR_SIZE, "Cannot create the presets directory: %s", strerror(errno));
+            return -1;
+        }
+    }
+    int fd = open(config->presets, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    if (fd >= 0 && !flock(fd, LOCK_EX)) return fd;
+    snprintf(error, ERROR_SIZE, "Cannot lock the presets directory: %s", strerror(errno));
+    if (fd >= 0) close(fd);
+    return -1;
+}
+
+static bool
+write_preset(const Config *config, const char *path, const Preset *preset, bool replace, char *error)
+{
+    char temp[PATH_SIZE];
+    if (snprintf(temp, sizeof temp, "%s/.undocked-XXXXXX", config->presets) >= (int)sizeof temp) {
+        snprintf(error, ERROR_SIZE, "Preset path is too long.");
         return false;
     }
     int fd = mkstemp(temp);
@@ -317,6 +339,86 @@ preset_write(const Config *config, const Preset *preset, bool replace, char *err
         snprintf(error, ERROR_SIZE, errno == EEXIST ? "A preset named %.63s already exists." :
                  "Could not save preset %.63s.", preset->name);
     unlink(temp);
+    return ok;
+}
+
+bool
+preset_write(const Config *config, const Preset *preset, bool replace, char *error)
+{
+    char path[PATH_SIZE];
+    if (!preset_path(config, preset->name, path, error)) return false;
+    int lock = lock_presets(config, true, error);
+    if (lock < 0) return false;
+    bool ok = write_preset(config, path, preset, replace, error);
+    close(lock);
+    return ok;
+}
+
+static bool
+update_preset(const Config *config, const char *name, const Layout *layout, bool automatic, char *error)
+{
+    char path[PATH_SIZE];
+    if (!preset_path(config, name, path, error)) return false;
+    int lock = lock_presets(config, false, error);
+    if (lock < 0) return false;
+    Preset preset;
+    bool ok = preset_read(path, &preset, error);
+    if (ok) {
+        if (layout) preset.layout = *layout;
+        else preset.automatic = automatic;
+        ok = write_preset(config, path, &preset, true, error);
+    }
+    close(lock);
+    return ok;
+}
+
+bool
+preset_overwrite(const Config *config, const char *name, const Layout *layout, char *error)
+{
+    return update_preset(config, name, layout, false, error);
+}
+
+bool
+preset_set_automatic(const Config *config, const char *name, bool automatic, char *error)
+{
+    return update_preset(config, name, NULL, automatic, error);
+}
+
+bool
+preset_rename(const Config *config, const char *name, const char *new_name, char *error)
+{
+    char path[PATH_SIZE], target[PATH_SIZE];
+    if (!preset_path(config, name, path, error) || !preset_path(config, new_name, target, error))
+        return false;
+    int lock = lock_presets(config, false, error);
+    if (lock < 0) return false;
+    Preset preset;
+    bool ok = preset_read(path, &preset, error);
+    if (ok && strcmp(path, target)) {
+        ok = syscall(SYS_renameat2, AT_FDCWD, path, AT_FDCWD, target, RENAME_NOREPLACE) == 0;
+        if (!ok && errno == EEXIST)
+            snprintf(error, ERROR_SIZE, "A preset named %.63s already exists.", new_name);
+        else if (!ok)
+            snprintf(error, ERROR_SIZE, "Cannot rename preset: %s", strerror(errno));
+    }
+    close(lock);
+    return ok;
+}
+
+bool
+preset_delete(const Config *config, const char *name, char *error)
+{
+    char path[PATH_SIZE];
+    if (!preset_path(config, name, path, error)) return false;
+    int lock = lock_presets(config, false, error);
+    if (lock < 0) return false;
+    Preset preset;
+    bool ok = preset_read(path, &preset, error);
+    if (ok && unlink(path) != 0) {
+        snprintf(error, ERROR_SIZE, "Cannot delete preset: %s", strerror(errno));
+        ok = false;
+    }
+    close(lock);
     return ok;
 }
 

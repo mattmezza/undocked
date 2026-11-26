@@ -101,6 +101,10 @@ bool preset_name(const char *);
 bool preset_path(const Config *, const char *, char *, char *);
 bool preset_read(const char *, Preset *, char *);
 bool preset_write(const Config *, const Preset *, bool replace, char *);
+bool preset_overwrite(const Config *, const char *, const Layout *, char *);
+bool preset_set_automatic(const Config *, const char *, bool, char *);
+bool preset_rename(const Config *, const char *, const char *, char *);
+bool preset_delete(const Config *, const char *, char *);
 int preset_list(const Config *, char names[PRESETS][NAME]);
 
 bool same_mode(Mode, Mode);

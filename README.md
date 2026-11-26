@@ -41,20 +41,25 @@ current X session. Existing `tray` settings can be removed from `config.ini`.
   presets keep the exact RandR rate.
 - **Row**, **Column**, and **Two above** are shortcuts below the layout. Row
   centers displays vertically, Column centers them horizontally, and Two above
-  appears for three displays. **More…** offers other alignments and Mirror or
-  Extend.
+  appears for three displays. **More…** lists every available arrangement,
+  including those shortcuts, the other alignments, and Mirror or Extend.
 - Click **Apply** and then **Keep**. Undocked restores the previous layout if the
   countdown expires. If the old layout is unavailable, it tries a connected
   output at a supported mode.
 - Open **Manage presets** to load a saved layout, see its script path, or
   toggle **Autoapply**. An info button explains why a preset is unavailable.
   **New preset** saves the active layout and turns spaces in the name into dashes.
+  Use the **…** button on a preset to rename it, overwrite it with the active
+  layout, or delete it. Overwriting preserves **Autoapply**. Overwrite and
+  delete ask for confirmation.
 
 ![Settings for a selected display showing its connector, resolution, and refresh rate](media/display-details.png)
 
 ![More arrangements showing row and column alignments](media/arrangements.png)
 
 ![Manage presets showing two layouts with file paths and Autoapply checkboxes](media/preset.png)
+
+![Preset actions for renaming, overwriting, or deleting a saved layout](media/preset-actions.png)
 
 ![The preset information dialog explaining which display setup is required](media/preset-info.png)
 
@@ -95,7 +100,7 @@ INI settings. Display numbers, connector names, resolutions, and refresh rates
 use the mono face.
 
 Set `quick_arrangements` under `[ui]` to choose and order the shortcuts. Leave
-it empty to put every layout under **More…**. Set `drawer_animation_ms = 0` to
+it empty to use **More…** for every layout. Set `drawer_animation_ms = 0` to
 open the drawer immediately.
 
 ## Launch and scripts
@@ -117,6 +122,7 @@ command=undocked launch
 undocked status --json
 undocked presets --json
 undocked save office-dock --auto
+undocked overwrite office-dock
 undocked preset office-dock --dry-run
 undocked preset office-dock               # then run keep or revert
 undocked layout row --yes                 # bottom aligned
@@ -125,6 +131,8 @@ undocked output DP-1 mode 2560x1440@60
 undocked output DP-1 primary
 undocked identify
 undocked recover
+undocked rename office-dock new-office-dock
+undocked delete new-office-dock
 ```
 
 Run `undocked --help` for the full command list. JSON output carries a schema

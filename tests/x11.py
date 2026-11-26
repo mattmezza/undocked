@@ -166,7 +166,7 @@ with tempfile.TemporaryDirectory(prefix="undocked-test-") as temp:
         time.sleep(0.3)
         if multi:
             original = state()["outputs"]
-            # Quick Row is middle aligned. More offers the other alignments.
+            # Quick Row is middle aligned. More lists it alongside Top and Bottom.
             click(wid, 151, 464)
             click(wid, 697, 464)
             wait_for(lambda: state()["confirmation_seconds"] > 0)
@@ -177,6 +177,13 @@ with tempfile.TemporaryDirectory(prefix="undocked-test-") as temp:
             wait_for(lambda: state()["outputs"] == original)
             click(wid, 415, 464)
             click(wid, 250, 117)
+            click(wid, 697, 464)
+            wait_for(lambda: state()["confirmation_seconds"] > 0)
+            assert state()["outputs"] == preview
+            click(wid, 611, 464)
+            wait_for(lambda: state()["outputs"] == original)
+            click(wid, 415, 464)
+            click(wid, 410, 117)
             click(wid, 697, 464)
             wait_for(lambda: state()["confirmation_seconds"] > 0)
             bottom = max(out["mode"]["height"] for out in original)
@@ -210,10 +217,38 @@ with tempfile.TemporaryDirectory(prefix="undocked-test-") as temp:
         run("xdotool", "windowfocus", wid)
         run("xdotool", "type", "--delay", "10", "Editor preset")
         run("xdotool", "key", "Return")
-        wait_for(lambda: (config / "presets" / "Editor-preset.sh").is_file())
+        created = config / "presets" / "Editor-preset.sh"
+        wait_for(created.is_file)
         click(wid, 548, 96)
         presets = json.loads(call("presets", "--json"))["presets"]
         assert next(p for p in presets if p["name"] == "Editor-preset")["autoapply"]
+
+        before_rename = created.read_bytes()
+        call("rename", "Editor-preset", "Portable layout", code=1)
+        assert created.read_bytes() == before_rename
+        click(wid, 716, 96)
+        click(wid, 290, 233)
+        run("xdotool", "type", "--delay", "10", "Editor renamed")
+        run("xdotool", "key", "Return")
+        renamed = config / "presets" / "Editor-renamed.sh"
+        wait_for(renamed.is_file)
+        assert not created.exists() and renamed.read_bytes() == before_rename
+        assert renamed.stat().st_mode & 0o111
+
+        if multi:
+            call("layout", "y", "--yes")
+        saved = state()["outputs"]
+        inode = renamed.stat().st_ino
+        click(wid, 716, 96)
+        click(wid, 290, 272)
+        click(wid, 520, 322)
+        wait_for(lambda: renamed.stat().st_ino != inode)
+        assert "# autoapply=true" in renamed.read_text()
+        if multi:
+            assert renamed.read_bytes() != before_rename
+            call("preset", "Office dock", "--yes")
+            call("preset", "Editor-renamed", "--yes")
+            assert state()["outputs"] == saved
         click(wid, 548, 96)
 
         # The workflow invokes Launch with its picker contract, then runs the chosen action.
@@ -231,7 +266,7 @@ printf '%s\\n' "$choices" | grep -Fx "$UNDOCKED_TEST_CHOICE" || exit 127
 
         choose("Identify displays")
         wait_for(lambda: window("Undocked Identify"))
-        choose("Switch to Editor-preset")
+        choose("Switch to Editor-renamed")
         if state()["confirmation_seconds"]:
             choose("Keep display changes")
         if multi:
@@ -242,7 +277,7 @@ printf '%s\\n' "$choices" | grep -Fx "$UNDOCKED_TEST_CHOICE" || exit 127
             assert state()["outputs"][1]["enabled"]
             choose("Revert display changes")
             assert not state()["outputs"][1]["enabled"]
-            choose("Switch to Editor-preset")
+            choose("Switch to Editor-renamed")
             assert state()["outputs"][1]["enabled"]
             choose("Keep display changes")
             choose("Mirror displays")
@@ -252,6 +287,22 @@ printf '%s\\n' "$choices" | grep -Fx "$UNDOCKED_TEST_CHOICE" || exit 127
             assert any(out["position"] != [0, 0] for out in state()["outputs"])
             choose("Keep display changes")
         time.sleep(0.45)
+        click(wid, 716, 96)
+        click(wid, 290, 311)
+        click(wid, 422, 322)
+        assert renamed.is_file()
+        click(wid, 716, 96)
+        click(wid, 290, 311)
+        click(wid, 520, 322)
+        wait_for(lambda: not renamed.exists())
+        assert script.is_file()
+        call("overwrite", "Editor-renamed", code=1)
+        call("save", "CLI preset", "--auto")
+        call("overwrite", "CLI preset")
+        call("rename", "CLI preset", "cli-preset")
+        assert "# autoapply=true" in (config / "presets" / "cli-preset.sh").read_text()
+        call("delete", "cli-preset")
+        assert not (config / "presets" / "cli-preset.sh").exists()
         run("xdotool", "windowfocus", wid, "key", "--delay", "150", "Escape", "Escape")
         assert editor.wait(timeout=5) == 0
     finally:

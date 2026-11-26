@@ -11,6 +11,8 @@
 #include <string.h>
 
 enum Page { DISPLAYS, PRESETS_PAGE, ARRANGE, DISPLAY_MODES };
+enum PresetDialog { NO_DIALOG, NEW_PRESET, PRESET_ACTIONS, RENAME_PRESET, OVERWRITE_PRESET,
+                    DELETE_PRESET, PRESET_INFO };
 
 typedef struct {
     X11 x;
@@ -24,16 +26,16 @@ typedef struct {
     Reply live;
     Layout base, draft, extended;
     bool editing, closing, mirrored, save_auto, have_extended, redraw;
-    bool form, focus_name, save_enter, pointer_down, drag_moved, frame_ready;
-    bool quick_visible[ARRANGEMENT_COUNT], drawer_animating;
+    bool focus_name, select_name, save_enter, pointer_down, drag_moved, frame_ready, drawer_animating;
     long long drawer_opened;
     size_t caret;
     int selected, dragging, start_x, start_y, from_x, from_y, offset, menu_count;
     float scale, origin_x, origin_y;
     cui_rect tiles[OUTPUTS], canvas;
     enum Page page;
+    enum PresetDialog dialog;
     char name[NAME], notice[ERROR_SIZE], form_error[ERROR_SIZE];
-    char info_name[NAME], info[ERROR_SIZE];
+    char preset_target[NAME];
     char presets[PRESETS][NAME];
 } Editor;
 
@@ -70,7 +72,7 @@ label(Editor *e, cui_rect bounds, const char *text, float size, cui_color color,
     cui_end_box(ui);
 }
 
-enum ButtonStyle { QUIET, SELECTED, PRIMARY };
+enum ButtonStyle { QUIET, SELECTED, PRIMARY, DESTRUCTIVE };
 
 static bool
 button(Editor *e, const char *key, cui_rect bounds, const char *name, enum Icon icon,
@@ -83,6 +85,7 @@ button(Editor *e, const char *key, cui_rect bounds, const char *name, enum Icon 
     cui_color bg = {0}, border = {0}, fg = t.foreground;
     if (style == SELECTED) { bg = mix(t.background, t.accent, .12f); fg = t.accent; }
     if (style == PRIMARY) { bg = t.accent; fg = t.on_accent; }
+    if (style == DESTRUCTIVE) { bg = mix(t.panel, t.warning, .15f); fg = t.warning; }
     if (disabled) {
         bg = (cui_color){0};
         fg = mix(t.panel, t.muted, .65f);
@@ -90,7 +93,8 @@ button(Editor *e, const char *key, cui_rect bounds, const char *name, enum Icon 
         if (!bg.a) bg = t.panel;
         bg = mix(bg, style == PRIMARY ? t.foreground : t.accent, last.pressed ? .23f : .1f);
     }
-    if (last.focus_visible && !disabled) border = style == PRIMARY ? t.on_accent : t.accent;
+    if (last.focus_visible && !disabled)
+        border = style == PRIMARY ? t.on_accent : (style == DESTRUCTIVE ? t.warning : t.accent);
     cui_begin_absolute_box(ui, id, (cui_box){
         .background = bg, .border = border, .border_width = border.a ? 1 : 0,
         .radius = t.radius, .align_x = CUI_ALIGN_CENTER, .align_y = CUI_ALIGN_CENTER
@@ -174,6 +178,7 @@ receive(Editor *e, Reply reply, bool reset)
     bool moved = !layout_equal(&active, &e->base);
     e->live = reply;
     e->base = active;
+    if (reply.remaining || changed) e->dialog = NO_DIALOG;
     if (moved && e->frame_ready) keep_visible(e);
     if (reset || changed || confirmation_changed || (!e->editing && moved && e->dragging < 0)) {
         e->draft = e->base;
@@ -184,8 +189,6 @@ receive(Editor *e, Reply reply, bool reset)
             e->have_extended = false;
             e->selected = -1;
             if (e->page == DISPLAY_MODES) e->page = DISPLAYS;
-            e->form = false;
-            *e->info = 0;
             strcpy(e->notice, "Connected displays changed. Layout refreshed.");
         }
         if (e->selected >= e->draft.count) e->selected = -1;
@@ -452,8 +455,7 @@ open_page(Editor *e, enum Page page)
 {
     e->page = page;
     e->offset = 0;
-    e->form = false;
-    *e->info = 0;
+    e->dialog = NO_DIALOG;
     *e->notice = 0;
     if (page == PRESETS_PAGE) e->menu_count = preset_list(&e->config, e->presets);
 }
@@ -591,36 +593,23 @@ static void
 draw_shortcuts(Editor *e, float w, float y)
 {
     const Config *config = &e->config;
-    int available = 0, requested = 0, shown = 0;
-    float widths[ARRANGEMENT_COUNT] = {0}, total = 0;
     const float left = 24, right = w - 24, more_width = 76;
     float x = left;
-    memset(e->quick_visible, 0, sizeof e->quick_visible);
-    for (enum Arrangement i = 0; i < ARRANGEMENT_COUNT; i++) available += show_arrangement(e, i);
+    if (button(e, "identify", (cui_rect){x, y, 84, 33}, "Identify", ICON_EYE,
+               QUIET, !main_display(&e->base), false, false)) ask(e, IDENTIFY, NULL);
+    if (!show_arrangement(e, ROW_CENTER)) return;
+    x += 94;
     for (int i = 0; i < config->quick_count; i++) {
         enum Arrangement kind = config->quick[i];
         if (!show_arrangement(e, kind)) continue;
-        widths[kind] = ceilf(cui_measure_text_ex(e->paint.ui, cui_string(arrangements[kind].name), 14,
+        float width = ceilf(cui_measure_text_ex(e->paint.ui, cui_string(arrangements[kind].name), 14,
             (cui_text_style){.weight = CUI_TEXT_WEIGHT_MEDIUM}).width) + 37;
-        total += widths[kind] + 3;
-        requested++;
-    }
-    if (button(e, "identify", (cui_rect){x, y, 84, 33}, "Identify", ICON_EYE,
-               QUIET, !main_display(&e->base), false, false)) ask(e, IDENTIFY, NULL);
-    x += 94;
-    float limit = requested < available || x + total > right ? right - more_width : right;
-    for (int i = 0; i < config->quick_count; i++) {
-        enum Arrangement kind = config->quick[i];
-        float width = widths[kind];
-        if (!width || x + width > limit) continue;
-        e->quick_visible[kind] = true;
-        shown++;
+        if (x + width + 3 > right - more_width) continue;
         if (button(e, arrangement_key(kind), (cui_rect){x, y, width, 33}, arrangements[kind].name,
                    arrangements[kind].icon, QUIET, false, false, false)) choose_arrangement(e, kind);
         x += width + 3;
     }
-    if (shown < available &&
-        button(e, "arrange", (cui_rect){fminf(x, right - more_width), y, more_width, 33},
+    if (button(e, "arrange", (cui_rect){fminf(x, right - more_width), y, more_width, 33},
                "More…", ICON_MORE, QUIET, false, false, false)) open_page(e, ARRANGE);
 }
 
@@ -634,7 +623,7 @@ draw_arrangements(Editor *e, bool blocked)
     for (int group = 0; group < 3; group++) {
         int column = 0;
         for (enum Arrangement kind = group * 3, end = (group + 1) * 3; kind < end; kind++) {
-            if (e->quick_visible[kind] || !show_arrangement(e, kind)) continue;
+            if (!show_arrangement(e, kind)) continue;
             if (!column) label(e, (cui_rect){26, y, 200, 22}, groups[group], 13, t.muted, false, false);
             const char *name = arrangements[kind].alignment ? arrangements[kind].alignment : arrangements[kind].name;
             if (action_row(e, arrangement_key(kind), (cui_rect){23 + column * (width + 8), y + 27, width, 39},
@@ -649,19 +638,66 @@ draw_arrangements(Editor *e, bool blocked)
     }
 }
 
-static void
-save(Editor *e)
+static bool
+can_save(const Editor *e)
 {
-    if (!preset_name(e->name)) {
-        strcpy(e->form_error, "Start with a letter or digit. Use letters, digits, -, _ or .");
-        return;
+    return !e->live.remaining && !e->editing && main_display(&e->base);
+}
+
+static void
+open_preset_dialog(Editor *e, enum PresetDialog dialog)
+{
+    e->dialog = dialog;
+    *e->form_error = 0;
+    e->focus_name = dialog == NEW_PRESET || dialog == RENAME_PRESET;
+    e->select_name = dialog == RENAME_PRESET;
+    if (dialog == RENAME_PRESET) {
+        strcpy(e->name, e->preset_target);
+        e->caret = strlen(e->name);
+    } else if (dialog == NEW_PRESET) {
+        *e->name = 0;
+        e->caret = 0;
+        e->save_auto = false;
     }
-    Preset preset = {.automatic = e->save_auto, .layout = e->base};
-    strcpy(preset.name, e->name);
-    if (!normalize_layout(&e->live.topology, &preset.layout, e->form_error) ||
-        !preset_write(&e->config, &preset, false, e->form_error)) return;
-    open_page(e, PRESETS_PAGE);
-    snprintf(e->notice, sizeof e->notice, "Saved %.63s.", e->name);
+    e->redraw = true;
+}
+
+static void
+save_preset_dialog(Editor *e)
+{
+    enum PresetDialog action = e->dialog;
+    const char *name = e->preset_target, *result;
+    bool ok;
+    if (action == NEW_PRESET || action == OVERWRITE_PRESET) {
+        if (!ask(e, GET, NULL)) {
+            strcpy(e->form_error, e->notice);
+            return;
+        }
+        if (e->dialog != action) return;
+        if (!can_save(e)) {
+            strcpy(e->form_error, "Apply and keep the display layout first.");
+            return;
+        }
+        Preset preset = {.automatic = e->save_auto, .layout = e->base};
+        if (!normalize_layout(&e->live.topology, &preset.layout, e->form_error)) return;
+        if (action == NEW_PRESET) {
+            name = e->name;
+            strcpy(preset.name, name);
+            ok = preset_write(&e->config, &preset, false, e->form_error);
+        } else ok = preset_overwrite(&e->config, name, &preset.layout, e->form_error);
+        result = action == NEW_PRESET ? "Saved" : "Updated";
+    } else if (action == RENAME_PRESET) {
+        name = e->name;
+        ok = preset_rename(&e->config, e->preset_target, name, e->form_error);
+        result = "Renamed to";
+    } else if (action == DELETE_PRESET) {
+        ok = preset_delete(&e->config, name, e->form_error);
+        result = "Deleted";
+    } else return;
+    if (!ok) return;
+    e->dialog = NO_DIALOG;
+    e->menu_count = preset_list(&e->config, e->presets);
+    snprintf(e->notice, sizeof e->notice, "%s %.63s.", result, name);
 }
 
 static bool
@@ -685,8 +721,9 @@ draw_preset_form(Editor *e, float width, float height)
 {
     Theme t = e->paint.theme;
     cui_context *ui = e->paint.ui;
-    float w = fminf(376, width - 32), h = 214;
-    if (!begin_dialog(e, "preset-dialog", "New preset",
+    bool rename = e->dialog == RENAME_PRESET;
+    float w = fminf(376, width - 32), h = rename ? 184 : 214;
+    if (!begin_dialog(e, "preset-dialog", rename ? "Rename preset" : "New preset",
         (cui_rect){floorf((width - w) / 2), floorf((height - h) / 2), w, h})) return;
     label(e, (cui_rect){20, 50, w - 40, 21}, "Name", 13, t.muted, false, false);
 
@@ -704,42 +741,82 @@ draw_preset_form(Editor *e, float width, float height)
     cui_text_style regular = {0};
     size_t start = 0;
     cui_str visible = {e->name, e->caret};
-    while (start < e->caret && cui_measure_text_ex(ui, visible, 15, regular).width > w - 63) {
+    while (!e->select_name && start < e->caret && cui_measure_text_ex(ui, visible, 15, regular).width > w - 63) {
         start++;
         visible = (cui_str){e->name + start, e->caret - start};
     }
     float caret_x = cui_measure_text_ex(ui, visible, 15, regular).width;
+    if (focused && e->select_name)
+        fill(e, (cui_rect){8, 8, fminf(w - 56, caret_x + 4), 21}, mix(t.background, t.accent, .4f), 2);
     label(e, (cui_rect){*e->name || !focused ? 10 : 13, 0, w - 60, 37},
           *e->name ? e->name + start : "e.g. home-dock", 15, *e->name ? t.foreground : t.muted, false, false);
-    if (focused) fill(e, (cui_rect){10 + floorf(caret_x), 10, 1, 17}, t.accent, 0);
+    if (focused && !e->select_name) fill(e, (cui_rect){10 + floorf(caret_x), 10, 1, 17}, t.accent, 0);
     cui_end_box(ui);
 
-    if (checkbox(e, "form-auto", (cui_rect){14, 117, w - 34, 31}, "Autoapply on connection",
+    if (!rename && checkbox(e, "form-auto", (cui_rect){14, 117, w - 34, 31}, "Autoapply on connection",
                  e->save_auto, false)) e->save_auto = !e->save_auto;
-    label(e, (cui_rect){20, 149, w - 40, 20}, e->form_error, 12, t.warning, false, false);
-    if (button(e, "form-close", (cui_rect){w - 188, 165, 72, 33}, "Cancel",
-               ICON_NONE, QUIET, false, false, false)) e->form = false;
-    if (button(e, "form-save", (cui_rect){w - 109, 165, 89, 33}, "Save",
-               ICON_NONE, PRIMARY, !*e->name, false, false)) save(e);
+    label(e, (cui_rect){20, h - 66, w - 40, 20}, e->form_error, 12, t.warning, false, false);
+    if (button(e, "form-close", (cui_rect){w - 188, h - 49, 72, 33}, "Cancel",
+               ICON_NONE, QUIET, false, false, false)) e->dialog = NO_DIALOG;
+    if (button(e, "form-save", (cui_rect){w - 109, h - 49, 89, 33}, rename ? "Rename" : "Save",
+               ICON_NONE, PRIMARY, !*e->name, false, false)) save_preset_dialog(e);
     cui_end_box(ui);
     cui_end_focus_scope(ui);
 }
 
 static void
-draw_preset_info(Editor *e, float width, float height)
+draw_preset_message(Editor *e, float width, float height)
 {
     Theme t = e->paint.theme;
     cui_context *ui = e->paint.ui;
-    float w = fminf(430, width - 32), h = 189;
-    if (!begin_dialog(e, "preset-info", "Preset can’t be loaded",
+    bool info = e->dialog == PRESET_INFO, deleting = e->dialog == DELETE_PRESET;
+    const char *title = info ? "Preset can’t be loaded" : (deleting ? "Delete preset?" : "Overwrite preset?");
+    const char *copy = info ? e->form_error : (deleting ?
+        "This removes the preset script from disk." :
+        "Replace this preset with the active display layout and keep its Autoapply setting.");
+    float w = fminf(430, width - 32), h = info ? 189 : 208;
+    if (!begin_dialog(e, "preset-message", title,
         (cui_rect){floorf((width - w) / 2), floorf((height - h) / 2), w, h})) return;
-    label(e, (cui_rect){20, 47, w - 40, 24}, e->info_name, 14, t.accent, false, false);
+    label(e, (cui_rect){20, 47, w - 40, 24}, e->preset_target, 14, t.accent, false, false);
     cui_begin_absolute_box(ui, 0, (cui_box){.clip = true}, (cui_rect){20, 81, w - 40, 51});
-    cui_text_paragraph_colored(ui, cui_string(e->info), 14, t.foreground, 19,
+    cui_text_paragraph_colored(ui, cui_string(copy), 14, t.foreground, 19,
                                (cui_text_style){0}, true, NULL, 0);
     cui_end_box(ui);
-    if (button(e, "info-close", (cui_rect){w - 98, h - 48, 78, 32}, "Done",
-               ICON_NONE, PRIMARY, false, false, false)) *e->info = 0;
+    if (info) {
+        if (button(e, "info-close", (cui_rect){w - 98, h - 48, 78, 32}, "Done",
+                   ICON_NONE, PRIMARY, false, false, false)) e->dialog = NO_DIALOG;
+    } else {
+        label(e, (cui_rect){20, 132, w - 40, 20}, e->form_error, 12, t.warning, false, false);
+        if (button(e, "message-close", (cui_rect){w - 208, h - 49, 72, 33}, "Cancel",
+                   ICON_NONE, QUIET, false, false, false)) e->dialog = NO_DIALOG;
+        if (button(e, "message-confirm", (cui_rect){w - 126, h - 49, 106, 33},
+                   deleting ? "Delete" : "Overwrite", ICON_NONE, deleting ? DESTRUCTIVE : PRIMARY,
+                   false, false, false))
+            save_preset_dialog(e);
+    }
+    cui_end_box(ui);
+    cui_end_focus_scope(ui);
+}
+
+static void
+draw_preset_actions(Editor *e, float width, float height)
+{
+    Theme t = e->paint.theme;
+    cui_context *ui = e->paint.ui;
+    float w = fminf(380, width - 32), h = 224;
+    if (!begin_dialog(e, "preset-actions", "Preset actions",
+        (cui_rect){floorf((width - w) / 2), floorf((height - h) / 2), w, h})) return;
+    if (button(e, "actions-close", (cui_rect){w - 49, 12, 30, 32}, "Close preset actions",
+               ICON_CLOSE, QUIET, false, false, true)) e->dialog = NO_DIALOG;
+    label(e, (cui_rect){20, 47, w - 40, 24}, e->preset_target, 14, t.accent, false, false);
+    if (action_row(e, "actions-rename", (cui_rect){10, 80, w - 20, 36}, "Rename",
+                   ICON_NONE, ICON_FORWARD, false, false, false)) open_preset_dialog(e, RENAME_PRESET);
+    if (action_row(e, "actions-overwrite", (cui_rect){10, 119, w - 20, 36}, "Overwrite with current layout",
+                   ICON_NONE, ICON_FORWARD, false, !can_save(e), false)) open_preset_dialog(e, OVERWRITE_PRESET);
+    if (action_row(e, "actions-delete", (cui_rect){10, 158, w - 20, 36}, "Delete",
+                   ICON_NONE, ICON_FORWARD, false, false, false)) open_preset_dialog(e, DELETE_PRESET);
+    if (!can_save(e))
+        label(e, (cui_rect){20, 195, w - 40, 19}, "Apply and keep the display layout to overwrite.", 12, t.muted, false, false);
     cui_end_box(ui);
     cui_end_focus_scope(ui);
 }
@@ -749,15 +826,9 @@ draw_presets(Editor *e, bool blocked)
 {
     Theme t = e->paint.theme;
     float w = (float)e->paint.width, h = (float)e->paint.height;
-    bool can_save = !blocked && main_display(&e->base) && !e->editing;
     subpage_title(e, "Manage presets", blocked);
     if (button(e, "new-preset", (cui_rect){w - 145, 19, 121, 32}, "New preset", ICON_PLUS,
-               PRIMARY, !can_save, false, false)) {
-        e->form = e->focus_name = true;
-        e->save_auto = false;
-        e->caret = 0;
-        *e->name = *e->form_error = 0;
-    }
+               PRIMARY, blocked || !can_save(e), false, false)) open_preset_dialog(e, NEW_PRESET);
     if (!e->menu_count)
         label(e, (cui_rect){26, 77, w - 52, 26}, "No saved presets yet.", 15, t.muted, false, false);
     int rows = (int)fmaxf(1, floorf((h - 119) / 58));
@@ -774,7 +845,7 @@ draw_presets(Editor *e, bool blocked)
         bool match = read && resolve_layout(&e->live.topology, &preset.layout, e->config.match_ports,
             &layout, error) && normalize_layout(&e->live.topology, &layout, error);
         if (row) fill(e, (cui_rect){25, y, w - 50, 1}, mix(t.background, t.border, .47f), 0);
-        label(e, (cui_rect){26, y + 3, w - 258, 27}, e->presets[i], 17, t.foreground, false, false);
+        label(e, (cui_rect){26, y + 3, w - 297, 27}, e->presets[i], 17, t.foreground, false, false);
         if (found) {
             const char *home = getenv("HOME");
             size_t len = home ? strlen(home) : 0;
@@ -782,17 +853,16 @@ draw_presets(Editor *e, bool blocked)
                 memmove(path + 1, path + len, strlen(path + len) + 1);
                 path[0] = '~';
             }
-            label(e, (cui_rect){26, y + 31, w - 250, 19}, path, 12, t.muted, true, false);
+            label(e, (cui_rect){26, y + 31, w - 289, 19}, path, 12, t.muted, true, false);
         }
         snprintf(id, sizeof id, "auto-%s", e->presets[i]);
-        if (checkbox(e, id, (cui_rect){w - 224, y + 13, 105, 31}, "Autoapply",
+        if (checkbox(e, id, (cui_rect){w - 263, y + 13, 105, 31}, "Autoapply",
                      read && preset.automatic, blocked || !read)) {
-            preset.automatic = !preset.automatic;
-            if (preset_write(&e->config, &preset, true, e->notice)) *e->notice = 0;
+            if (preset_set_automatic(&e->config, e->presets[i], !preset.automatic, e->notice)) *e->notice = 0;
         }
         if (match) {
             snprintf(id, sizeof id, "load-%s", e->presets[i]);
-            if (action_row(e, id, (cui_rect){w - 103, y + 13, 79, 31}, "Load", ICON_NONE,
+            if (action_row(e, id, (cui_rect){w - 143, y + 13, 79, 31}, "Load", ICON_NONE,
                            ICON_FORWARD, false, blocked, false)) {
                 e->draft = layout;
                 open_page(e, DISPLAYS);
@@ -800,11 +870,20 @@ draw_presets(Editor *e, bool blocked)
             }
         } else {
             snprintf(id, sizeof id, "info-%s", e->presets[i]);
-            if (button(e, id, (cui_rect){w - 83, y + 13, 39, 31}, "Why can’t I load this preset?",
+            if (button(e, id, (cui_rect){w - 123, y + 13, 39, 31}, "Why can’t I load this preset?",
                        ICON_INFO, QUIET, blocked, false, true)) {
-                strcpy(e->info_name, e->presets[i]);
-                strcpy(e->info, error);
+                open_preset_dialog(e, PRESET_INFO);
+                strcpy(e->preset_target, e->presets[i]);
+                strcpy(e->form_error, error);
             }
+        }
+        snprintf(id, sizeof id, "more-%s", e->presets[i]);
+        char actions[NAME + 16];
+        snprintf(actions, sizeof actions, "Actions for %s", e->presets[i]);
+        if (button(e, id, (cui_rect){w - 64, y + 13, 40, 31}, actions,
+                   ICON_MORE, QUIET, blocked || !read, false, true)) {
+            strcpy(e->preset_target, e->presets[i]);
+            open_preset_dialog(e, PRESET_ACTIONS);
         }
     }
     page_control(e, w - 24, h - 48, e->menu_count, rows);
@@ -903,7 +982,7 @@ draw(Editor *e)
     if (!cui_begin_frame(ui, (float)w, (float)h, .016f)) return;
     e->drawer_animating = false;
     bool pending = e->live.remaining > 0;
-    bool modal = (e->form || *e->info) && !pending;
+    bool modal = e->dialog != NO_DIALOG && !pending;
     cui_begin_box(ui, cui_id_from(ui, "window"), (cui_box){.width = (float)w, .height = (float)h});
     cui_begin_absolute_box(ui, 0, (cui_box){.inert = modal}, (cui_rect){0, 0, w, h});
     switch (e->page) {
@@ -931,8 +1010,12 @@ draw(Editor *e)
     }
     cui_end_box(ui);
     if (modal) {
-        if (e->form) draw_preset_form(e, w, h);
-        else draw_preset_info(e, w, h);
+        switch (e->dialog) {
+        case NEW_PRESET: case RENAME_PRESET: draw_preset_form(e, w, h); break;
+        case PRESET_ACTIONS: draw_preset_actions(e, w, h); break;
+        case PRESET_INFO: case OVERWRITE_PRESET: case DELETE_PRESET: draw_preset_message(e, w, h); break;
+        case NO_DIALOG: break;
+        }
     }
     cui_end_box(ui);
     painter_present(&e->paint, &e->x, e->window, e->gc, cui_end_frame(ui));
@@ -1003,7 +1086,7 @@ handle_pointer(Editor *e, XEvent event)
         return;
     }
     if (!motion && event.xbutton.button != Button1) {
-        bool pager = !e->form && !*e->info && (e->page == PRESETS_PAGE || e->page == DISPLAY_MODES);
+        bool pager = e->dialog == NO_DIALOG && (e->page == PRESETS_PAGE || e->page == DISPLAY_MODES);
         if (press && pager && event.xbutton.button == Button4 && e->offset > 0) e->offset--;
         if (press && pager && event.xbutton.button == Button5) e->offset++;
         return;
@@ -1052,20 +1135,37 @@ keyboard(Editor *e, XKeyEvent event)
     }
     if (down && symbol == XK_Escape) {
         if (e->live.remaining) ask(e, REVERT, NULL);
-        else if (e->form) e->form = false;
-        else if (*e->info) *e->info = 0;
+        else if (e->dialog != NO_DIALOG) e->dialog = NO_DIALOG;
         else if (e->page != DISPLAYS) open_page(e, DISPLAYS);
         else if (e->selected >= 0) e->selected = -1;
         else e->closing = true;
         return;
     }
-    if (e->form && !e->live.remaining && down && (e->focus_name ||
+    if ((e->dialog == NEW_PRESET || e->dialog == RENAME_PRESET) && !e->live.remaining && down && (e->focus_name ||
         cui_focused(e->paint.ui) == cui_id_from(e->paint.ui, "preset-name"))) {
         size_t length = strlen(e->name);
+        bool printable = n == 1 && bytes[0] >= 32 && bytes[0] <= 126 && !(event.state & ControlMask);
+        if ((event.state & ControlMask) && (symbol == XK_a || symbol == XK_A)) {
+            e->select_name = length > 0;
+            e->caret = length;
+            return;
+        }
+        if (e->select_name) {
+            if (symbol == XK_Left || symbol == XK_Right || symbol == XK_Home || symbol == XK_End) {
+                e->caret = symbol == XK_Left || symbol == XK_Home ? 0 : length;
+                e->select_name = false;
+                return;
+            }
+            if (symbol == XK_BackSpace || symbol == XK_Delete || printable) {
+                *e->name = 0;
+                length = e->caret = 0;
+                e->select_name = false;
+            }
+        }
         switch (symbol) {
         case XK_Return:
             e->save_enter = true;
-            if (length && main_display(&e->base)) save(e);
+            if (length) save_preset_dialog(e);
             return;
         case XK_Home: e->caret = 0; return;
         case XK_End: e->caret = length; return;
@@ -1082,7 +1182,7 @@ keyboard(Editor *e, XKeyEvent event)
                 memmove(e->name + e->caret, e->name + e->caret + 1, length - e->caret);
             return;
         default:
-            if (n == 1 && length < NAME - 1 && bytes[0] >= 32 && bytes[0] <= 126 && !(event.state & ControlMask)) {
+            if (printable && length < NAME - 1) {
                 memmove(e->name + e->caret + 1, e->name + e->caret, length - e->caret + 1);
                 e->name[e->caret++] = bytes[0] == ' ' ? '-' : bytes[0];
                 return;
